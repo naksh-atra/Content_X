@@ -23,7 +23,8 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 DUMP_DIR = os.path.join(BASE_DIR, "dump")
 ARCHIVE_DIR = os.path.join(BASE_DIR, "archive")
-PROCESS_FILE = os.path.join(BASE_DIR, "process.txt")
+# PROCESS_FILE = os.path.join(BASE_DIR, "process.txt")
+PROCESS_FILE = os.path.join(BASE_DIR, "process_mini.txt")
 LOG_FILE = os.path.join(BASE_DIR, "posted_log.txt")
 
 # === TELEGRAM ===
@@ -210,7 +211,7 @@ def main():
     print(f"[{time.strftime('%H:%M')}]Starting post bot...")
 
     if not os.path.exists(PROCESS_FILE):
-        print("ERROR: process.txt not found")
+        print("ERROR: instructions file not found")
         return
 
     with open(PROCESS_FILE, "r", encoding="utf-8") as f:
