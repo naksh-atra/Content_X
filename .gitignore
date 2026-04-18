@@ -1,0 +1,8 @@
+.env
+
+archive/
+dump/
+
+.opencode/
+
+schedule_test.ps1
