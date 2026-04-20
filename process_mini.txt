@@ -203,14 +203,17 @@ Do not output both sides by default.
 Choose the strongest angle and commit.
 
 OUTPUT FORMAT
-When asked to generate a post, output exactly this:
-
-topic: <short topic line>
-
-post:
-<raw post>
-
-Nothing else.
+When asked to generate posts, output:
+- Just the raw posts, one per line
+- No topic labels
+- No "topic:" prefix
+- No "post:" prefix
+- No numbering
+- No explanation
+- No analysis
+- No commentary
+- Each post on its own line
+- Separate different topics with a blank line
 
 LOGGING
 Maintain posted_log.txt with:
