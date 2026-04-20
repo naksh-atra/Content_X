@@ -6,3 +6,5 @@ dump/
 .opencode/
 
 schedule_test.ps1
+
+posted_log.txt
