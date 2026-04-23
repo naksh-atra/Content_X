@@ -1,0 +1,35 @@
+{
+  "morning_rss": [
+    "https://techcrunch.com/feed/",
+    "https://cio.economictimes.indiatimes.com/rss/topstories",
+    "https://cio.economictimes.indiatimes.com/rss/recentstories",
+    "https://cio.economictimes.indiatimes.com/rss/artificial-intelligence",
+    "https://cio.economictimes.indiatimes.com/rss/next-gen-technologies",
+    "https://cio.economictimes.indiatimes.com/rss/digital-security",
+    "https://cio.economictimes.indiatimes.com/rss/cloud-computing",
+    "https://cio.economictimes.indiatimes.com/rss/big-data"
+  ],
+  "morning_scrape": [
+    "https://techcrunch.com/category/artificial-intelligence/",
+    "https://indiaai.gov.in",
+    "https://www.pib.gov.in"
+  ],
+  "reddit_subs": [
+    "technology",
+    "artificial",
+    "MachineLearning",
+    "singularity",
+    "LocalLLaMA",
+    "programming",
+    "ExperiencedDevs",
+    "startups",
+    "SaaS",
+    "OpenAI"
+  ],
+  "youtube_channels": [
+    "UChpleBmo18P08aKCIgti38g",
+    "UCKelCK4ZaO6HeEI1KQjqzWA",
+    "UCNJ1Ymd5yFuUPtn21xtRbbw"
+  ],
+  "youtube_pending": []
+}
