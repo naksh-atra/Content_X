@@ -26,10 +26,13 @@
     "SaaS",
     "OpenAI"
   ],
-  "youtube_channels": [
-    "UChpleBmo18P08aKCIgti38g",
-    "UCKelCK4ZaO6HeEI1KQjqzWA",
-    "UCNJ1Ymd5yFuUPtn21xtRbbw"
+  "reddit_subs_evening": [
+    "videos",
+    "technology",
+    "MachineLearning",
+    "technews",
+    "gadgets"
   ],
+  "youtube_channels": [],
   "youtube_pending": []
 }

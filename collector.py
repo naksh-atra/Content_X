@@ -12,6 +12,7 @@ import json
 import time
 import glob
 import re
+import random
 import requests
 import feedparser
 from datetime import datetime, timedelta
@@ -30,6 +31,13 @@ RSS_TIMEOUT = 15
 API_TIMEOUT = 20
 SCRAPE_TIMEOUT = 30
 MAX_ITEMS_PER_SOURCE = 15
+
+# Max items per source per mode
+MAX_ITEMS = {
+    "morning": 8,
+    "noon": 4,
+    "evening": 8
+}
 
 
 def load_json(path):
@@ -190,9 +198,30 @@ def extract_full_content(item):
     return item
 
 
-def process_items(items, seen_store):
-    processed = []
+def process_items(items, seen_store, mode="morning"):
+    # Cap items per source based on mode
+    max_per_mode = MAX_ITEMS.get(mode, 8)
+    
+    # Group by source
+    by_source = {}
     for item in items:
+        source = item.get("source", "unknown")
+        if source not in by_source:
+            by_source[source] = []
+        by_source[source].append(item)
+    
+    # Select random items per source
+    limited_items = []
+    for source, source_items in by_source.items():
+        if len(source_items) > max_per_mode:
+            selected = random.sample(source_items, max_per_mode)
+        else:
+            selected = source_items
+        limited_items.extend(selected)
+    
+    # Continue with normal processing
+    processed = []
+    for item in limited_items:
         url = item.get("url", "")
         title = (item.get("title", "") or "")[:100].strip()
         if not url or not title:
@@ -271,11 +300,10 @@ def run_collector(mode):
         for sub in sources.get("reddit_subs", []):
             all_items.extend(fetch_reddit_rss(sub))
     elif mode == "evening":
-        for channel_id in sources.get("youtube_channels", []):
-            if channel_id:
-                all_items.extend(fetch_youtube_feed(channel_id))
+        for sub in sources.get("reddit_subs_evening", []):
+            all_items.extend(fetch_reddit_rss(sub))
 
-    processed = process_items(all_items, seen_store)
+    processed = process_items(all_items, seen_store, mode)
     save_json(DEDUPE_FILE, seen_store)
     count = write_dump_file(mode, processed)
     print(f"[{datetime.now().strftime('%H:%M')}] Done. {count} items to {mode}_dump.txt")
