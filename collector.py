@@ -35,7 +35,7 @@ MAX_ITEMS_PER_SOURCE = 15
 # Max items per source per mode
 MAX_ITEMS = {
     "morning": 8,
-    "noon": 4,
+    "noon": 2,
     "evening": 8
 }
 
