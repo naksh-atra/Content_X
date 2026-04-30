@@ -774,11 +774,179 @@ def build_batch_header(mode: str, is_shadow: bool = False) -> str:
 
 def build_section_header(section: str) -> str:
     """Build section header."""
-    return f"═══ {section} ═══"
+    dash_count = int((40 - len(section)) / 2)
+    return "=" * dash_count + " " + section + " " + "=" * dash_count
 
 
-def package_outputs(originals: list, qt_replies: list, threads: list, mode: str, is_shadow: bool = False) -> list[str]:
-    """Package outputs for Telegram delivery."""
+# === LLM GENERATION ===
+
+def call_llm(prompt: str, max_tokens: int = 512) -> tuple[str, str, bool]:
+    """Call Groq primary, Gemini fallback. Returns (output, provider, success)."""
+    # Groq attempt
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    payload = {
+        "model": "llama-3.3-70b-versatile",
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.7,
+        "max_tokens": max_tokens
+    }
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    
+    for attempt in range(3):
+        try:
+            response = requests.post(url, json=payload, headers=headers, timeout=60)
+            if response.status_code == 429:
+                wait_time = (2 ** attempt) * 5
+                time.sleep(wait_time)
+                continue
+            if response.status_code != 200:
+                time.sleep(2)
+                continue
+            
+            result = response.json()
+            if "choices" in result and len(result["choices"]) > 0:
+                text = result["choices"][0]["message"]["content"]
+                if text:
+                    return text.strip(), "groq", True
+        except Exception as e:
+            time.sleep(2)
+            continue
+    
+    # Gemini fallback
+    gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
+    gemini_payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.7, "maxOutputTokens": max_tokens}
+    }
+    headers = {"Content-Type": "application/json"}
+    
+    try:
+        response = requests.post(gemini_url, json=gemini_payload, headers=headers, timeout=120)
+        if response.status_code == 200:
+            result = response.json()
+            if "candidates" in result and len(result["candidates"]) > 0:
+                text = result["candidates"][0]["content"]["parts"][0]["text"]
+                if text:
+                    return text.strip(), "gemini", True
+    except:
+        pass
+    
+    return "", "none", False
+
+
+def build_original_prompt(candidate: Candidate, voice_rules: str) -> str:
+    """Build prompt for original builder post generation."""
+    prompt = f"""You are writing SHORT ORIGINAL BUILDER POSTS for @SatyaNaaksh.
+
+Base rules from voice layer:
+{voice_rules[:500]}
+
+The content is from a real experiment or hands-on test.
+The post must feel like a builder sharing a real observation.
+
+FORMAT:
+- 2 to 4 lines
+- hook -> concrete result/failure -> direct question (when natural)
+- no formal structure, but one clear point only
+- must reference something specific: a tool, result, failure, timing
+
+TONE:
+- lowercase, casual, sarcastic when useful
+- "i tested / tried / this broke / this surprised me" energy
+- no thought-leader voice
+
+CONTENT:
+- prefer operational consequences
+- prefer what changes for builders in production
+- never fake a result
+
+Candidate content:
+{candidate.raw_text[:600]}
+
+Matched keywords: {', '.join(candidate.lane_keywords)}
+Source: {candidate.source}
+
+Output just the raw post, one per line if multiple, no explanation."""
+    return prompt
+
+
+def generate_originals(candidates: list, bundle, max_posts: int = 3) -> list:
+    """Generate original posts from top candidates."""
+    if not candidates:
+        return []
+    
+    # Sort by score, take top N
+    sorted_cands = sorted(candidates, key=lambda x: x.computed_score, reverse=True)[:max_posts]
+    
+    # Load builder prompt
+    builder_prompt_path = os.path.join(BASE_DIR, "process_builder.txt")
+    builder_rules = safe_read_text_file(builder_prompt_path)
+    
+    generated = []
+    for cand in sorted_cands:
+        # Skip if no visual
+        if cand.visual_state == "required_missing":
+            continue
+        
+        prompt = build_original_prompt(cand, bundle.voice_rules or builder_rules)
+        output, provider, success = call_llm(prompt, max_tokens=256)
+        
+        if success and output and len(output) > 10:
+            generated.append({
+                "candidate_id": cand.id,
+                "content": output,
+                "source": cand.source,
+                "score": cand.computed_score
+            })
+            print(f"[v3] Generated original from {cand.source} via {provider}")
+    
+    return generated
+
+
+def generate_qt_replies(candidates: list, bundle, max_posts: int = 5) -> list:
+    """Generate QT/reply drafts from candidates."""
+    if not candidates:
+        return []
+    
+    sorted_cands = sorted(candidates, key=lambda x: x.computed_score, reverse=True)[:max_posts]
+    
+    qt_prompt_path = os.path.join(BASE_DIR, "process_reply_qt.txt")
+    qt_rules = safe_read_text_file(qt_prompt_path)
+    
+    # Default QT rules if file missing
+    if not qt_rules:
+        qt_rules = """Generate short QT/REPLY drafts.
+- Under 280 characters
+- Add original insight
+- Be punchy, not bloated"""
+    
+    generated = []
+    for cand in sorted_cands:
+        prompt = f"""You are generating QT/REPLY DRAFTS for @SatyaNaaksh.
+
+{qt_rules}
+
+Source content:
+{cand.raw_text[:400]}
+
+Output just the draft, one per line if multiple."""
+        output, provider, success = call_llm(prompt, max_tokens=140)
+        
+        if success and output and len(output) > 10:
+            generated.append({
+                "candidate_id": cand.id,
+                "content": output,
+                "source": cand.source
+            })
+    
+    return generated
+
+
+def package_with_generated(originals: list, qt_replies: list, threads: list, mode: str, is_shadow: bool = False) -> list[str]:
+    """Package generated outputs for Telegram delivery."""
     messages = []
     
     # Batch header
@@ -791,15 +959,19 @@ def package_outputs(originals: list, qt_replies: list, threads: list, mode: str,
         messages.append("(image required)")
         messages.append("")
         for orig in originals:
-            messages.append(short_snippet(orig.raw_text, 200))
+            messages.append(orig)
             messages.append("")
+    else:
+        messages.append(build_section_header("ORIGINAL POSTS"))
+        messages.append("(no originals passed threshold)")
+        messages.append("")
     
     # QT/reply section
     if qt_replies:
         messages.append(build_section_header("QT / REPLY DRAFTS"))
         messages.append("")
         for qt in qt_replies:
-            messages.append(short_snippet(qt.raw_text, 200))
+            messages.append(qt)
             messages.append("")
     
     # Threads section
@@ -832,12 +1004,30 @@ def main():
     qt_replies = [c for c in candidates if c.candidate_type == "qt_reply"]
     threads = [c for c in candidates if c.candidate_type == "thread"]
     
-    print(f"[v3] Ready for generation: {len(originals)} originals, {len(qt_replies)} qt_replies, {len(threads)} threads")
+    print(f"[v3] Generating from {len(originals)} originals, {len(qt_replies)} qt_replies...")
     
-    # Package for Telegram (placeholder - generation not implemented yet)
-    messages = package_outputs(originals, qt_replies, threads, bundle.mode, SHADOW_MODE)
+    # Generate posts (skip in DRY_RUN)
+    if not DRY_RUN and originals:
+        generated_originals = generate_originals(originals, bundle, max_posts=2)
+    else:
+        generated_originals = []
+        print("[v3] DRY_RUN - skipping generation")
     
-    print("[v3] Telegram packaging ready (generation not yet implemented)")
+    if not DRY_RUN and qt_replies:
+        generated_qt = generate_qt_replies(qt_replies, bundle, max_posts=3)
+    else:
+        generated_qt = []
+    
+    # Package for Telegram
+    orig_texts = [g["content"] for g in generated_originals]
+    qt_texts = [g["content"] for g in generated_qt]
+    messages = package_with_generated(orig_texts, qt_texts, [], bundle.mode, SHADOW_MODE)
+    
+    # Print sample output
+    print("[v3] === Generated Output Sample ===")
+    for msg in messages[:15]:
+        print(msg)
+    print("[v3] === End Sample ===")
 
 
 if __name__ == "__main__":
