@@ -16,3 +16,7 @@ schedule_collector_noon.ps1
 seen_urls.json
 
 __pycache__/
+
+current.txt
+
+v3_plan.md
