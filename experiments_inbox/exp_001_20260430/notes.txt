@@ -1,0 +1,12 @@
+What was tested:
+- Compared cursor composer vs cursor agent mode on same 200-line refactoring task
+- Both given same prompt: convert plain JS functions to TypeScript with error handling
+
+Result:
+- Composer: completed in 45 seconds, 0 errors, all tests passed
+- Agent mode: completed in 2 minutes, 1 type error, had to fix manually
+- Composer output was cleaner and more complete
+
+Key observation:
+- Composer is actually better for one-shot transformations
+- Agent mode is good for exploration, not production code

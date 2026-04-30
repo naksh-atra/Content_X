@@ -1,0 +1,6 @@
+title: cursor agent comparison test
+date: 2026-04-30
+status: success
+visual_files: test_output.png, comparison.png
+tags: cursor, agent, comparison
+notes_ref: notes.txt

@@ -1,0 +1,6 @@
+title: langchain test yesterday
+date: 2026-04-29
+status: success
+visual_files: output.png
+tags: langchain, rag
+notes_ref: notes.txt

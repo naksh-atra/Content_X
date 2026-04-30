@@ -1,0 +1,6 @@
+title: tried autogen
+date: 2026-04-28
+status: partial
+visual_files: 
+tags: autogen
+notes_ref: notes.txt
