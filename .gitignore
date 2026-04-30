@@ -8,3 +8,11 @@ dump/
 schedule_test.ps1
 
 posted_log.txt
+
+schedule_collector_evening.ps1
+schedule_collector_morning.ps1
+schedule_collector_noon.ps1
+
+seen_urls.json
+
+__pycache__/

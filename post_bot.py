@@ -9,6 +9,7 @@ import glob
 import time
 import random
 import requests
+from datetime import datetime
 from dotenv import load_dotenv
 
 # === CONFIGURATION ===
@@ -206,9 +207,43 @@ def archive_files(files):
                 counter += 1
         os.rename(f, archive_path)
 
+
+def get_ist_hour():
+    utc_hour = datetime.utcnow().hour
+    ist_hour = utc_hour + 5
+    if ist_hour >= 24:
+        ist_hour -= 24
+    return ist_hour
+
+
+def get_mode_from_time():
+    hour = get_ist_hour()
+    if 8 <= hour <= 12:
+        return "morning"
+    elif 13 <= hour <= 17:
+        return "noon"
+    elif 18 <= hour <= 22:
+        return "evening"
+    return None
+
+
+def get_dump_file(mode):
+    if mode is None:
+        return None
+    dump_file = os.path.join(DUMP_DIR, f"{mode}_dump.txt")
+    if os.path.exists(dump_file):
+        return dump_file
+    return None
+
+
 # === MAIN ===
 def main():
-    print(f"[{time.strftime('%H:%M')}]Starting post bot...")
+    mode = get_mode_from_time()
+    if mode is None:
+        print("Outside posting window (6-23 IST)")
+        return
+
+    print(f"[{time.strftime('%H:%M')}]Starting post bot ({mode})...")
 
     if not os.path.exists(PROCESS_FILE):
         print("ERROR: instructions file not found")
@@ -217,18 +252,15 @@ def main():
     with open(PROCESS_FILE, "r", encoding="utf-8") as f:
         rules = f.read()
 
-    files = sorted(glob.glob(os.path.join(DUMP_DIR, "*.txt")))
-    if not files:
-        print("No dump files found")
+    dump_file = get_dump_file(mode)
+    if not dump_file:
+        print(f"No {mode}_dump.txt found")
         return
 
-    print(f"Found {len(files)} file(s) to process")
+    print(f"Processing {os.path.basename(dump_file)}")
 
-    dump_content = ""
-    for f in files:
-        with open(f, "r", encoding="utf-8") as file:
-            dump_content += f"\n--- {os.path.basename(f)} ---\n"
-            dump_content += file.read()
+    with open(dump_file, "r", encoding="utf-8") as f:
+        dump_content = f.read()
 
     posts_text = generate_posts(dump_content, rules)
 
@@ -274,9 +306,19 @@ def main():
     if topics_logged:
         update_log(topics_logged, LOG_FILE)
 
-    archive_files(files)
+    if dump_file:
+        os.makedirs(ARCHIVE_DIR, exist_ok=True)
+        base = os.path.basename(dump_file)
+        ext = os.path.splitext(base)[1]
+        archive_path = os.path.join(ARCHIVE_DIR, base)
+        counter = 1
+        while os.path.exists(archive_path):
+            archive_path = os.path.join(ARCHIVE_DIR, f"{base.replace(ext, '')}_{counter}{ext}")
+            counter += 1
+        os.rename(dump_file, archive_path)
+        print(f"Archived {base}")
 
-    print(f"Done. Processed {len(files)} file(s)")
+    print(f"Done. {len(topics_logged)} posts sent")
 
 
 if __name__ == "__main__":
