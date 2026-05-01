@@ -25,7 +25,8 @@ For threads:
 General Requirements:
 - Always personal and first-hand: Use "I tested", "I ran", "Spent X hours", "Got Y%", "Broke on", "This actually worked better than expected", etc.
 - Include specific, measurable details (time, success rate, prompt length, error types, lines of code, etc.).
-- Write every post assuming the user will attach a relevant screenshot (code snippet, tool output, error log, before/after, console, benchmark result).
+- Visuals (screenshots) are strongly preferred when a relevant image exists, but a strong specific original can still ship as text-only if no good screenshot is available.
+- Write every post assuming the user may attach a relevant screenshot (code snippet, tool output, error log, before/after, console, benchmark result).
 - Tone: Practical, grounded, opinionated but not arrogant. Call out hype honestly. Dry humor is okay if it fits naturally.
 - No fluff, no generic commentary, no "this is wild", no vague reactions.
 - Failed experiments are valuable — highlight the real lesson or surprise.
