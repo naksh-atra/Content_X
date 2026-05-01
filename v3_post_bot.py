@@ -65,6 +65,10 @@ ENABLE_THREADS = False     # Start False — enable only in Phase 4
 ENABLE_DUMP_ORIGINALS = True
 ENABLE_EXPERIMENTS = True
 
+# Visual policy (builder identity, not image-mandatory)
+VISUAL_REQUIRED_FOR_ORIGINAL = False      # False = allow text-only strong originals
+VISUAL_PREFERRED_FOR_EXPERIMENT_ORIGINAL = True   # True = strongly prefer, not block
+
 === ROUTING LOGIC ===
 
 STEP 1 — Lane filter
@@ -145,6 +149,10 @@ SHADOW_MODE = True  # Set True to label output as test
 ENABLE_THREADS = False
 ENABLE_DUMP_ORIGINALS = True
 ENABLE_EXPERIMENTS = True
+
+# Visual policy (builder identity, not image-mandatory)
+VISUAL_REQUIRED_FOR_ORIGINAL = False      # False = allow text-only strong originals
+VISUAL_PREFERRED_FOR_EXPERIMENT_ORIGINAL = True   # True = strongly prefer, not block
 
 # === LANE KEYWORDS ===
 LANE_KEYWORDS = [
@@ -545,9 +553,12 @@ def assign_candidate_type(candidate: Candidate) -> str:
     if not candidate.lane_match:
         return "discard"
     
+    visual_required = VISUAL_PREFERRED_FOR_EXPERIMENT_ORIGINAL and candidate.source_type == "experiment"
+    visual_ok = candidate.visual_state != "required_missing" or not visual_required
+    
     # Experiment source
     if candidate.source_type == "experiment":
-        if candidate.computed_score >= THRESHOLD_EXPERIMENT_ORIGINAL and candidate.visual_state == "required_present":
+        if candidate.computed_score >= THRESHOLD_EXPERIMENT_ORIGINAL and visual_ok:
             return "original"
         if ENABLE_THREADS and candidate.computed_score >= THRESHOLD_THREAD:
             return "thread"
@@ -968,8 +979,9 @@ def validate_original(post_content: str, candidate) -> tuple[bool, str]:
     if not has_specific:
         return False, "no_specific_detail"
     
-    # Must have visual backing if candidate required it
-    if candidate.visual_state == "required_missing":
+    # Visual policy: strongly prefer for experiment, not mandatory
+    # Skip reject on "required_missing" unless explicitly configured
+    if VISUAL_REQUIRED_FOR_ORIGINAL and candidate.visual_state == "required_missing":
         return False, "no_visual_backing"
     
     # Check for generic phrases
