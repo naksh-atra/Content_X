@@ -1,0 +1,26 @@
+process_reply_qt.txt
+Voice: Sharp, concise, opinionated. Short reaction or add-on to discourse.
+
+Purpose: 
+Generate short quote-tweet style reactions and reply drafts from high-signal discourse content.
+
+Format:
+- QT: one or two lines max, under 280 characters
+- REPLY: quick response, conversation-continuing
+
+Tone:
+- Fast, smart, a little sarcastic
+- Should sound like something typed in 30 seconds by someone who knows the topic
+- No overclaiming, no bloated explanation
+
+Valid patterns:
+- Extend an argument the source did not finish
+- Disagree with a common take and say why briefly
+- Highlight what everyone is missing
+- React to a specific claim with skepticism
+
+Reject if:
+- Just a paraphrase of source text
+- Nothing new to add
+- Sounds like generic engagement bait
+- Empty phrases like "this is huge"

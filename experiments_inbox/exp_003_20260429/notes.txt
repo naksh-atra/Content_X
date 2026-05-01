@@ -1,0 +1,9 @@
+What was tested:
+- langchain rag pipeline with custom embeddings
+
+Result:
+- Retrieval took 800ms on 1000 docs
+- Similarity search worked but quality varied
+
+Key observation:
+- chunk size matters more than model choice

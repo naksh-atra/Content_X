@@ -1,0 +1,8 @@
+What was tested:
+- autogen framework
+
+Result:
+- something
+
+Key observation:
+- its okay
