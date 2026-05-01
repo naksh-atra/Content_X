@@ -140,8 +140,8 @@ PROCESS_FILE = os.path.join(BASE_DIR, "process_mini.txt")
 LOG_FILE = os.path.join(BASE_DIR, "posted_log.txt")
 
 # === RUNTIME FLAGS ===
-DRY_RUN = False
-SHADOW_MODE = False
+DRY_RUN = False  # Set True to test without sending (set False for live)
+SHADOW_MODE = True  # Set True to label output as test
 ENABLE_THREADS = False
 ENABLE_DUMP_ORIGINALS = True
 ENABLE_EXPERIMENTS = True
