@@ -945,39 +945,224 @@ Output just the draft, one per line if multiple."""
     return generated
 
 
+# === SELECTION AND VALIDATION ===
+
+def validate_original(post_content: str, candidate) -> tuple[bool, str]:
+    """Validate generated original post. Returns (is_valid, rejection_reason)."""
+    # Check line count
+    lines = [l.strip() for l in post_content.split("\n") if l.strip()]
+    if len(lines) > 4:
+        return False, "exceeds_4_lines"
+    
+    # Check for banned patterns
+    lower = post_content.lower()
+    if any(banned in lower for banned in ["#", "##", "emoji", "em dash"]):
+        return False, "contains_banned_formatting"
+    
+    # Must name something specific (tool, time, result, comparison)
+    has_specific = any(word in lower for word in [
+        "ms", "seconds", "minutes", "hours", "%", "error", "failed", 
+        "cursor", "copilot", "langchain", "autogen", "vscode",
+        "benchmark", "latency", "tokens", "lines of code"
+    ])
+    if not has_specific:
+        return False, "no_specific_detail"
+    
+    # Must have visual backing if candidate required it
+    if candidate.visual_state == "required_missing":
+        return False, "no_visual_backing"
+    
+    # Check for generic phrases
+    generic_phrases = ["this is huge", "game changer", "so important", "breaking", "revolutionary"]
+    if any(p in lower for p in generic_phrases):
+        return False, "generic_phrasing"
+    
+    return True, ""
+
+
+def validate_qt_reply(post_content: str) -> tuple[bool, str]:
+    """Validate QT/reply post. Returns (is_valid, rejection_reason)."""
+    # Must be under 280 characters
+    if len(post_content) > 280:
+        return False, "exceeds_280"
+    
+    # Check for empty engagement phrases
+    lower = post_content.lower()
+    empty_phrases = ["this is huge", "so important", "game changer", "let's stop overselling"]
+    if any(p in lower for p in empty_phrases):
+        return False, "empty_engagement"  # too thin
+    
+    # Check if it's just paraphrasing (no new observation added)
+    # A proper QT should have numbers, comparisons, or specific counter-points
+    has_observation = any(word in lower for word in [
+        "%", "ms", "seconds", "compared", "but", "however", "actually",
+        "i tested", "i found", "data shows", "in my experience"
+    ])
+    if not has_observation:
+        return False, "no_original_observation"
+    
+    return True, ""
+
+
+def is_duplicate_angle(new_text: str, posted_history: str, similarity_threshold: float = 0.6) -> bool:
+    """Check if new post is too similar to recent posted content."""
+    if not posted_history or not new_text:
+        return False
+    
+    new_lower = new_text.lower()
+    new_words = set(new_lower.split())
+    
+    # Check last 40 lines of posted history
+    history_lines = posted_history.strip().split("\n")[-40:]
+    
+    for line in history_lines:
+        if not line or "|" not in line:
+            continue
+        
+        # Extract snippet from log line
+        parts = line.split("|")
+        if len(parts) >= 2:
+            old_text = parts[-1].strip().lower()
+            old_words = set(old_text.split())
+            
+            # Calculate word overlap
+            if len(new_words) > 0 and len(old_words) > 0:
+                intersection = new_words & old_words
+                union = new_words | old_words
+                similarity = len(intersection) / len(union) if union else 0
+                
+                if similarity > similarity_threshold:
+                    return True
+    
+    return False
+
+
+def select_outputs(
+    originals: list, 
+    qt_replies: list, 
+    threads: list, 
+    posted_history: str
+) -> tuple[list, list, list]:
+    """Select best outputs with caps and deduplication."""
+    selected_originals = []
+    selected_qt = []
+    selected_threads = []
+    
+    # Select originals (max 3)
+    for orig in originals:
+        # Validate
+        is_valid, reason = validate_original(orig["content"], orig.get("candidate"))
+        if not is_valid:
+            print(f"[v3] REJECTED original {orig['candidate_id']}: {reason}")
+            continue
+        
+        # Duplicate check
+        if is_duplicate_angle(orig["content"], posted_history):
+            print(f"[v3] REJECTED original {orig['candidate_id']}: duplicate_angle")
+            continue
+        
+        selected_originals.append(orig)
+        if len(selected_originals) >= 3:
+            break
+    
+    # Select QT/replies (max 5)
+    for qt in qt_replies:
+        is_valid, reason = validate_qt_reply(qt["content"])
+        if not is_valid:
+            print(f"[v3] REJECTED QT {qt['candidate_id']}: {reason}")
+            continue
+        
+        if is_duplicate_angle(qt["content"], posted_history):
+            print(f"[v3] REJECTED QT {qt['candidate_id']}: duplicate_angle")
+            continue
+        
+        selected_qt.append(qt)
+        if len(selected_qt) >= 5:
+            break
+    
+    return selected_originals, selected_qt, selected_threads
+
+
+# === TELEGRAM SENDING ===
+
+def send_telegram(message: str) -> bool:
+    """Send a message to Telegram."""
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
+    try:
+        response = requests.post(url, json=payload, timeout=30)
+        response.raise_for_status()
+        return True
+    except Exception as e:
+        print(f"[v3] Telegram error: {e}")
+        return False
+
+
+def send_to_telegram(messages: list, batch_label: str = "") -> int:
+    """Send messages to Telegram with delays."""
+    sent_count = 0
+    
+    for msg in messages:
+        if msg.strip():
+            if send_telegram(msg):
+                sent_count += 1
+                time.sleep(1)  # Rate limit
+    
+    return sent_count
+
+
+# === LOGGING ===
+
+def update_log_v3(
+    posts: list,
+    mode: str,
+    bundle_timestamp: str
+) -> None:
+    """Append to posted_log.txt with richer format."""
+    timestamp = bundle_timestamp
+    
+    for post in posts:
+        post_type = post.get("type", "original")
+        source = post.get("source", "unknown")
+        content = post.get("content", "")[:80]
+        
+        # Determine visual state
+        visual_indicator = "visual=present" if "experiment" in source else "visual=optional"
+        
+        log_line = f"{timestamp} | {mode} | type={post_type} | {visual_indicator} | source={source} | snippet={content}...\n"
+        
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(log_line)
+
+
 def package_with_generated(originals: list, qt_replies: list, threads: list, mode: str, is_shadow: bool = False) -> list[str]:
     """Package generated outputs for Telegram delivery."""
     messages = []
     
     # Batch header
-    messages.append(build_batch_header(mode, is_shadow))
+    shadow_tag = " [v3 TEST]" if is_shadow else ""
+    messages.append(f"[v3 {mode} batch]{shadow_tag}")
     messages.append("")
     
     # Original posts section
     if originals:
-        messages.append(build_section_header("ORIGINAL POSTS"))
+        messages.append("======== ORIGINAL POSTS ========")
         messages.append("(image required)")
         messages.append("")
         for orig in originals:
             messages.append(orig)
             messages.append("")
     else:
-        messages.append(build_section_header("ORIGINAL POSTS"))
-        messages.append("(no originals passed threshold)")
+        messages.append("ORIGINAL POSTS: (none passed validation)")
         messages.append("")
     
     # QT/reply section
     if qt_replies:
-        messages.append(build_section_header("QT / REPLY DRAFTS"))
+        messages.append("======== QT / REPLY DRAFTS ========")
         messages.append("")
         for qt in qt_replies:
             messages.append(qt)
             messages.append("")
-    
-    # Threads section
-    if threads and ENABLE_THREADS:
-        messages.append(build_section_header("THREAD CANDIDATES"))
-        messages.append("")
     
     return messages
 
@@ -1007,27 +1192,63 @@ def main():
     print(f"[v3] Generating from {len(originals)} originals, {len(qt_replies)} qt_replies...")
     
     # Generate posts (skip in DRY_RUN)
-    if not DRY_RUN and originals:
-        generated_originals = generate_originals(originals, bundle, max_posts=2)
-    else:
-        generated_originals = []
+    generated_originals = []
+    generated_qt = []
+    
+    if DRY_RUN:
         print("[v3] DRY_RUN - skipping generation")
-    
-    if not DRY_RUN and qt_replies:
-        generated_qt = generate_qt_replies(qt_replies, bundle, max_posts=3)
     else:
-        generated_qt = []
+        if originals:
+            generated_originals = generate_originals(originals, bundle, max_posts=3)
+        
+        if qt_replies:
+            generated_qt = generate_qt_replies(qt_replies, bundle, max_posts=5)
     
-    # Package for Telegram
-    orig_texts = [g["content"] for g in generated_originals]
-    qt_texts = [g["content"] for g in generated_qt]
+    # Add candidate info to generated posts for validation
+    for orig in generated_originals:
+        # Find matching candidate for visual check
+        for c in candidates:
+            if c.id == orig["candidate_id"]:
+                orig["candidate"] = c
+                break
+    
+    # Selection and validation
+    selected_originals, selected_qt, _ = select_outputs(
+        generated_originals, 
+        generated_qt, 
+        [], 
+        bundle.posted_history
+    )
+    
+    print(f"[v3] Selected: {len(selected_originals)} originals, {len(selected_qt)} qt_replies")
+    
+    # Package output
+    orig_texts = [g["content"] for g in selected_originals]
+    qt_texts = [g["content"] for g in selected_qt]
     messages = package_with_generated(orig_texts, qt_texts, [], bundle.mode, SHADOW_MODE)
     
-    # Print sample output
-    print("[v3] === Generated Output Sample ===")
-    for msg in messages[:15]:
-        print(msg)
-    print("[v3] === End Sample ===")
+    # Print sample output in DRY_RUN
+    if DRY_RUN or True:  # Always show for now
+        print("[v3] === Generated Output ===")
+        for msg in messages[:20]:
+            print(msg)
+        print("[v3] === End ===")
+    
+    # Send to Telegram (skip in DRY_RUN)
+    if not DRY_RUN and messages:
+        sent = send_to_telegram(messages, bundle.mode)
+        print(f"[v3] Sent {sent} messages to Telegram")
+        
+        # Log selected posts
+        all_posts = []
+        for o in selected_originals:
+            all_posts.append({**o, "type": "original"})
+        for q in selected_qt:
+            all_posts.append({**q, "type": "qt_reply"})
+        
+        if all_posts:
+            update_log_v3(all_posts, bundle.mode, bundle.timestamp)
+            print(f"[v3] Logged {len(all_posts)} posts")
 
 
 if __name__ == "__main__":
