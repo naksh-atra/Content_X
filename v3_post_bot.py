@@ -1085,41 +1085,98 @@ def select_outputs(
 
 # === TELEGRAM SENDING ===
 
-def find_best_image_for_post(post_content: str, candidate) -> str:
-    """Find best matching image for a post from experiments. Returns image path or empty string."""
+def is_valid_telegram_image(path: str) -> tuple[bool, str]:
+    """Validate image for Telegram. Returns (is_valid, reason)."""
+    import struct
+    
+    # Check file exists
+    if not os.path.exists(path):
+        return False, "file_not_found"
+    
+    # Check file size (must be > 1KB)
+    file_size = os.path.getsize(path)
+    if file_size < 1024:
+        return False, f"file_too_small_{file_size}_bytes"
+    
+    # Check extension
+    ext = os.path.splitext(path)[1].lower()
+    if ext not in (".png", ".jpg", ".jpeg", ".gif", ".webp"):
+        return False, f"invalid_extension_{ext}"
+    
+    # Check file header magic bytes
+    try:
+        with open(path, "rb") as f:
+            header = f.read(16)
+            
+        # PNG: 89 50 4E 47 0D 0A 1A 0A
+        if ext == ".png":
+            if not header.startswith(b'\x89PNG\r\n\x1a\n'):
+                return False, "invalid_png_header"
+        
+        # JPEG: FF D8 FF
+        elif ext in (".jpg", ".jpeg"):
+            if not header.startswith(b'\xff\xd8\xff'):
+                return False, "invalid_jpeg_header"
+        
+        # GIF: 47 49 46 38 39 61 or 47 49 46 38 37 61
+        elif ext == ".gif":
+            if not (header.startswith(b'GIF89a') or header.startswith(b'GIF87a')):
+                return False, "invalid_gif_header"
+        
+        # WebP: 52 49 46 46 ... 57 45 42 50
+        elif ext == ".webp":
+            if not (header[:4] == b'RIFF' and header[8:12] == b'WEBP'):
+                return False, "invalid_webp_header"
+                
+    except Exception as e:
+        return False, f"read_error_{str(e)}"
+    
+    return True, "valid"
+
+
+def find_best_image_for_post(post_content: str, candidate) -> tuple[str, str]:
+    """Find best matching image for a post from experiments. Returns (image_path, validation_reason)."""
     if not candidate or candidate.source_type != "experiment":
-        return ""
+        return "", "not_experiment_source"
     
     # Extract experiment folder from source
     if not candidate.source.startswith("experiment:"):
-        return ""
+        return "", "invalid_source_format"
     
     exp_folder = candidate.source.replace("experiment:", "")
     exp_path = os.path.join(EXPERIMENTS_DIR, exp_folder)
     
     if not os.path.isdir(exp_path):
-        return ""
+        return "", "exp_folder_not_found"
     
     # Find screenshots folder
     screenshots_path = os.path.join(exp_path, "screenshots")
     if not os.path.isdir(screenshots_path):
-        return ""
+        return "", "screenshots_not_found"
     
     # Get all images
     image_extensions = (".png", ".jpg", ".jpeg", ".gif", ".webp")
     images = [f for f in os.listdir(screenshots_path) if f.lower().endswith(image_extensions)]
     
     if not images:
-        return ""
+        return "", "no_images_found"
     
-    # Score images
+    # Score and validate images
     post_lower = post_content.lower()
     best_image = ""
     best_score = -100
+    best_reason = ""
     
     for img in images:
         score = 0
         img_lower = img.lower()
+        img_path = os.path.join(screenshots_path, img)
+        
+        # Validate first
+        is_valid, reason = is_valid_telegram_image(img_path)
+        if not is_valid:
+            print(f"[v3] Image rejected: {img} - {reason}")
+            continue
         
         # +50 if from same experiment
         score += 50
@@ -1144,25 +1201,40 @@ def find_best_image_for_post(post_content: str, candidate) -> str:
         
         if score > best_score:
             best_score = score
-            best_image = os.path.join(screenshots_path, img)
+            best_image = img_path
+            best_reason = f"valid_score_{score}"
     
     # Only return if score is positive
-    if best_score > 0 and os.path.exists(best_image):
-        return best_image
+    if best_score > 0 and best_image:
+        return best_image, best_reason
     
-    return ""
+    return "", "no_valid_image"
 
 
 def send_photo_to_telegram(chat_id: str, caption: str, image_path: str) -> bool:
     """Send a photo with caption to Telegram."""
+    # Defensive validation before upload
+    is_valid, reason = is_valid_telegram_image(image_path)
+    if not is_valid:
+        print(f"[v3] Image rejected pre-upload: {os.path.basename(image_path)} - {reason}")
+        return False
+    
+    # Truncate caption to Telegram limit (1024 chars max)
+    if len(caption) > 1024:
+        caption = caption[:1021] + "..."
+    
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
     try:
         with open(image_path, "rb") as photo:
             files = {"photo": photo}
             data = {"chat_id": chat_id, "caption": caption}
             response = requests.post(url, files=files, data=data, timeout=60)
+            print(f"[v3] Telegram response: {response.status_code} - {response.text[:200]}")
             response.raise_for_status()
             return True
+    except requests.exceptions.HTTPError as e:
+        print(f"[v3] Telegram photo HTTP {e.response.status_code}: {e.response.text[:300]}")
+        return False
     except Exception as e:
         print(f"[v3] Telegram photo error: {e}")
         return False
@@ -1320,13 +1392,18 @@ def main():
     posts_with_images = {}
     for i, orig in enumerate(selected_originals):
         candidate = orig.get("candidate")
-        image_path = find_best_image_for_post(orig["content"], candidate)
+        image_path, reason = find_best_image_for_post(orig["content"], candidate)
         if image_path:
-            posts_with_images[i] = image_path
-            orig["image"] = image_path
-            print(f"[v3] Image matched for original {i}: {os.path.basename(image_path)}")
+            is_valid, valid_reason = is_valid_telegram_image(image_path)
+            if is_valid:
+                posts_with_images[i] = image_path
+                orig["image"] = image_path
+                print(f"[v3] Image matched for original {i}: {os.path.basename(image_path)} ({valid_reason})")
+            else:
+                print(f"[v3] Image skipped for original {i}: {os.path.basename(image_path)} - {valid_reason}")
+                print(f"[v3] Falling back to text-only for original {i}")
         else:
-            print(f"[v3] No image found for original {i}")
+            print(f"[v3] No image found for original {i}: {reason}")
     
     # Package output
     orig_texts = [g["content"] for g in selected_originals]
