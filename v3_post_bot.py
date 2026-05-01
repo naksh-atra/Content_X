@@ -1085,6 +1085,89 @@ def select_outputs(
 
 # === TELEGRAM SENDING ===
 
+def find_best_image_for_post(post_content: str, candidate) -> str:
+    """Find best matching image for a post from experiments. Returns image path or empty string."""
+    if not candidate or candidate.source_type != "experiment":
+        return ""
+    
+    # Extract experiment folder from source
+    if not candidate.source.startswith("experiment:"):
+        return ""
+    
+    exp_folder = candidate.source.replace("experiment:", "")
+    exp_path = os.path.join(EXPERIMENTS_DIR, exp_folder)
+    
+    if not os.path.isdir(exp_path):
+        return ""
+    
+    # Find screenshots folder
+    screenshots_path = os.path.join(exp_path, "screenshots")
+    if not os.path.isdir(screenshots_path):
+        return ""
+    
+    # Get all images
+    image_extensions = (".png", ".jpg", ".jpeg", ".gif", ".webp")
+    images = [f for f in os.listdir(screenshots_path) if f.lower().endswith(image_extensions)]
+    
+    if not images:
+        return ""
+    
+    # Score images
+    post_lower = post_content.lower()
+    best_image = ""
+    best_score = -100
+    
+    for img in images:
+        score = 0
+        img_lower = img.lower()
+        
+        # +50 if from same experiment
+        score += 50
+        
+        # +20 if filename matches keywords in post
+        keywords = ["benchmark", "latency", "result", "output", "before", "after", "cursor", "rag", "test", "comparison", "error", "code"]
+        for kw in keywords:
+            if kw in img_lower or kw in post_lower:
+                score += 20
+        
+        # +15 for primary/featured in name
+        if "primary" in img_lower or "featured" in img_lower or "main" in img_lower:
+            score += 15
+        
+        # +10 for newer files (by name containing date/number)
+        if any(c.isdigit() for c in img):
+            score += 10
+        
+        # -20 for generic names
+        if img_lower in ["screenshot.png", "screenshot1.png", "screenshot2.png", "img.png", "image.png"]:
+            score -= 20
+        
+        if score > best_score:
+            best_score = score
+            best_image = os.path.join(screenshots_path, img)
+    
+    # Only return if score is positive
+    if best_score > 0 and os.path.exists(best_image):
+        return best_image
+    
+    return ""
+
+
+def send_photo_to_telegram(chat_id: str, caption: str, image_path: str) -> bool:
+    """Send a photo with caption to Telegram."""
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
+    try:
+        with open(image_path, "rb") as photo:
+            files = {"photo": photo}
+            data = {"chat_id": chat_id, "caption": caption}
+            response = requests.post(url, files=files, data=data, timeout=60)
+            response.raise_for_status()
+            return True
+    except Exception as e:
+        print(f"[v3] Telegram photo error: {e}")
+        return False
+
+
 def send_telegram(message: str) -> bool:
     """Send a message to Telegram."""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -1098,15 +1181,22 @@ def send_telegram(message: str) -> bool:
         return False
 
 
-def send_to_telegram(messages: list, batch_label: str = "") -> int:
-    """Send messages to Telegram with delays."""
+def send_to_telegram(messages: list, posts_with_images: dict, batch_label: str = "") -> int:
+    """Send messages to Telegram with delays. posts_with_images maps index to image_path."""
     sent_count = 0
     
-    for msg in messages:
+    for i, msg in enumerate(messages):
         if msg.strip():
-            if send_telegram(msg):
-                sent_count += 1
-                time.sleep(1)  # Rate limit
+            # Check if this message has an image
+            if i in posts_with_images and posts_with_images[i]:
+                image_path = posts_with_images[i]
+                if send_photo_to_telegram(TELEGRAM_CHAT_ID, msg, image_path):
+                    sent_count += 1
+                    print(f"[v3] Sent photo: {os.path.basename(image_path)}")
+            else:
+                if send_telegram(msg):
+                    sent_count += 1
+            time.sleep(1)  # Rate limit
     
     return sent_count
 
@@ -1125,11 +1215,15 @@ def update_log_v3(
         post_type = post.get("type", "original")
         source = post.get("source", "unknown")
         content = post.get("content", "")[:80]
+        image_used = post.get("image", "")
         
         # Determine visual state
         visual_indicator = "visual=present" if "experiment" in source else "visual=optional"
         
-        log_line = f"{timestamp} | {mode} | type={post_type} | {visual_indicator} | source={source} | snippet={content}...\n"
+        # Include image info if present
+        image_log = f" | image={os.path.basename(image_used)}" if image_used else ""
+        
+        log_line = f"{timestamp} | {mode} | type={post_type} | {visual_indicator}{image_log} | source={source} | snippet={content}...\n"
         
         with open(LOG_FILE, "a", encoding="utf-8") as f:
             f.write(log_line)
@@ -1222,6 +1316,18 @@ def main():
     
     print(f"[v3] Selected: {len(selected_originals)} originals, {len(selected_qt)} qt_replies")
     
+    # Find images for selected originals
+    posts_with_images = {}
+    for i, orig in enumerate(selected_originals):
+        candidate = orig.get("candidate")
+        image_path = find_best_image_for_post(orig["content"], candidate)
+        if image_path:
+            posts_with_images[i] = image_path
+            orig["image"] = image_path
+            print(f"[v3] Image matched for original {i}: {os.path.basename(image_path)}")
+        else:
+            print(f"[v3] No image found for original {i}")
+    
     # Package output
     orig_texts = [g["content"] for g in selected_originals]
     qt_texts = [g["content"] for g in selected_qt]
@@ -1236,7 +1342,7 @@ def main():
     
     # Send to Telegram (skip in DRY_RUN)
     if not DRY_RUN and messages:
-        sent = send_to_telegram(messages, bundle.mode)
+        sent = send_to_telegram(messages, posts_with_images, bundle.mode)
         print(f"[v3] Sent {sent} messages to Telegram")
         
         # Log selected posts
