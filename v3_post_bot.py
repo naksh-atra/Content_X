@@ -145,7 +145,7 @@ LOG_FILE = os.path.join(BASE_DIR, "posted_log.txt")
 
 # === RUNTIME FLAGS ===
 DRY_RUN = False  # Set True to test without sending (set False for live)
-SHADOW_MODE = True  # Set True to label output as test
+SHADOW_MODE = False  # Set True to label output as test (False = production)
 ENABLE_THREADS = False
 ENABLE_DUMP_ORIGINALS = True
 ENABLE_EXPERIMENTS = True
