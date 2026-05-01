@@ -1224,16 +1224,19 @@ def send_photo_to_telegram(chat_id: str, caption: str, image_path: str) -> bool:
         caption = caption[:1021] + "..."
     
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
+    file_size = os.path.getsize(image_path)
     try:
         with open(image_path, "rb") as photo:
             files = {"photo": photo}
             data = {"chat_id": chat_id, "caption": caption}
             response = requests.post(url, files=files, data=data, timeout=60)
-            print(f"[v3] Telegram response: {response.status_code} - {response.text[:200]}")
+            print(f"[v3] sendPhoto | path={os.path.basename(image_path)} | size={file_size} | status={response.status_code}")
+            if response.status_code != 200:
+                print(f"[v3] sendPhoto response: {response.text[:500]}")
             response.raise_for_status()
             return True
     except requests.exceptions.HTTPError as e:
-        print(f"[v3] Telegram photo HTTP {e.response.status_code}: {e.response.text[:300]}")
+        print(f"[v3] sendPhoto failed | path={os.path.basename(image_path)} | size={file_size} | status={e.response.status_code} | response={e.response.text[:300]}")
         return False
     except Exception as e:
         print(f"[v3] Telegram photo error: {e}")
