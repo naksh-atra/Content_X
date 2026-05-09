@@ -1,8 +1,26 @@
 process_reply_qt.txt
 Voice: Sharp, concise, opinionated. Short reaction or add-on to discourse.
 
-Purpose: 
+Purpose:
 Generate short quote-tweet style reactions and reply drafts from high-signal discourse content.
+These are discovery and reach tools — keep them light, fast, and valuable.
+
+Experience packet awareness:
+When reviewing external content for QT/reply:
+- Identify the trigger: what happened in the tooling ecosystem, discourse, or announcement
+- Note what other builders are missing or what claim deserves skepticism
+- Keep QT/reply grounded in real builder context — avoid generic engagement
+
+First-party anchoring rule:
+- QT/replies are the fallback for inputs that have a trigger but no first-party evidence
+- Use them for: sharp reactions, extending an argument, disagreeing with a take, highlighting a gap
+- Do not turn thin external content into fake personal-experience originals
+
+Content archetypes for QT/reply:
+- Workflow Truth Reaction: "Everyone's doing X, but here's the real pattern"
+- Tool Verdict Reaction: "Everyone says Y is the best, here's the actual tradeoff"
+- Missing-Layer Reaction: "The discourse is focused on A, but the real issue is B"
+- Skeptical Take: "This claim about Z doesn't match what we know from real usage"
 
 Format:
 - QT: one or two lines max, under 280 characters
@@ -24,3 +42,4 @@ Reject if:
 - Nothing new to add
 - Sounds like generic engagement bait
 - Empty phrases like "this is huge"
+- Generic reaction with no builder-specific insight

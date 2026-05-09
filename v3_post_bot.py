@@ -80,28 +80,39 @@ STEP 2 — Source priority
   dump source with engineering substance → ORIGINAL candidate
   dump source with hot discourse only → QT_REPLY candidate
 
-STEP 3 — Visual check for originals
+STEP 3 — Experience packet check
+  If input has first-party evidence (experiment, personal test results) → anchor on that
+  If input is only external trigger (news, changelog, discourse) → prefer QT/reply over fake original
+  Never fabricate personal experience that does not exist in input
+
+STEP 4 — Visual check for originals
   experiment with screenshot/image present → required_present
   experiment with explicit visual reference → evaluate conservatively
-  no visual support → required_missing → demote to qt_reply
+  no visual support → required_missing → demote to qt_reply only if VISUAL_REQUIRED_FOR_ORIGINAL=True
 
-STEP 4 — Thread check
+STEP 5 — Thread check
   sequential arc with genuine substance → THREAD candidate (ENABLE_THREADS gate)
   otherwise → single post format
 
-STEP 5 — Score and threshold
-  experiment original: score >= 25 + visual required
-  dump original: score >= 40 + visual required + first_party_strength != low
+STEP 6 — Score and threshold
+  experiment original: score >= 25 + visual preferred (not required)
+  dump original: score >= 40 + first_party_strength != low + must have genuine personal angle (no faking)
   thread: score >= 20
   qt_reply: score >= 10
 
 === SCORE THRESHOLDS ===
-| Post Type | Min Score | Visual Required | Notes |
-|---|---||---|
-| Experiment original | 25 | Yes | Lower threshold — first-party builder value |
-| Dump original | 40 | Yes | Stricter |
-| Thread | 20 | No | Only when real narrative arc |
-| QT/reply | 10 | No | Lowest-risk format |
+| Post Type | Min Score | Visual | Notes |
+|---|---||---|---|
+| Experiment original | 25 | Preferred | First-party anchor required |
+| Dump original | 40 | Optional | Must have genuine personal angle |
+| Thread | 20 | Optional | Real narrative arc only |
+| QT/reply | 10 | Text-first | External trigger fallback |
+
+=== FIRST-PARTY ANCHORING RULES ===
+- First-party evidence (experiments_inbox/) → Anchor post content
+- External sources (dump) → Trigger only, prefer QT/reply if no personal angle
+- Never fabricate personal experience from thin external inputs
+- Dump originals rejected if they read like generic commentary without real operator context
 
 === HARD REJECT CODES ===
 - generic
@@ -111,6 +122,7 @@ STEP 5 — Score and threshold
 - invented_opinion_risk
 - voice_mismatch
 - no_visual_for_original
+- fake_first_party (external input with no real personal angle forced as original)
 
 === ROLLBACK RULE ===
 If v3 produces empty/generic/broken output on live batches:
