@@ -170,6 +170,7 @@ SHADOW_MODE = False  # Set True to label output as test (False = production)
 ENABLE_THREADS = False
 ENABLE_DUMP_ORIGINALS = True
 ENABLE_EXPERIMENTS = True
+ENABLE_QT_REPLIES = False  # Disabled - only 4-part original threads
 
 # Visual policy (builder identity, not image-mandatory)
 VISUAL_REQUIRED_FOR_ORIGINAL = False      # False = allow text-only strong originals
@@ -1432,8 +1433,8 @@ def send_to_telegram(messages: list, batch_label: str = "") -> int:
     return sent_count
 
 
-def package_with_generated_thread(originals: list, qt_replies: list, mode: str, is_shadow: bool = False) -> list[tuple[str, str | None]]:
-    """Package 4-part threads and QT/replies for Telegram. Returns list of (content, image_path) tuples."""
+def package_with_generated_thread(originals: list, mode: str, is_shadow: bool = False) -> list[tuple[str, str | None]]:
+    """Package 4-part threads for Telegram. Returns list of (content, image_path) tuples."""
     messages = []
     
     shadow_tag = " [v3 TEST]" if is_shadow else ""
@@ -1451,12 +1452,6 @@ def package_with_generated_thread(originals: list, qt_replies: list, mode: str, 
                 messages.append((orig.get("content", ""), orig.get("image")))
     else:
         messages.append(("ORIGINAL THREADS: (none passed validation)", None))
-    
-    # QT/replies section
-    if qt_replies:
-        messages.append(("======== QT / REPLY DRAFTS ========", None))
-        for qt in qt_replies:
-            messages.append((qt.get("content", ""), None))
     
     return messages
 
@@ -1480,23 +1475,17 @@ def main():
     
     # Group by type
     originals = [c for c in candidates if c.candidate_type == "original"]
-    qt_replies = [c for c in candidates if c.candidate_type == "qt_reply"]
-    threads = [c for c in candidates if c.candidate_type == "thread"]
     
-    print(f"[v3] Generating from {len(originals)} originals, {len(qt_replies)} qt_replies...")
+    print(f"[v3] Generating from {len(originals)} original threads...")
     
     # Generate posts (skip in DRY_RUN)
     generated_originals = []
-    generated_qt = []
     
     if DRY_RUN:
         print("[v3] DRY_RUN - skipping generation")
     else:
         if originals:
             generated_originals = generate_originals(originals, bundle, max_posts=3)
-        
-        if qt_replies:
-            generated_qt = generate_qt_replies(qt_replies, bundle, max_posts=5)
     
     # Add candidate info to generated posts for validation
     for orig in generated_originals:
@@ -1507,14 +1496,21 @@ def main():
                 break
     
     # Selection and validation
-    selected_originals, selected_qt, _ = select_outputs(
-        generated_originals, 
-        generated_qt, 
-        [], 
-        bundle.posted_history
-    )
+    selected_originals = []
+    for orig in generated_originals:
+        is_valid, reason = validate_original(orig["content"], orig.get("candidate"), is_thread=True)
+        if not is_valid:
+            print(f"[v3] REJECTED thread {orig['candidate_id']}: {reason}")
+            continue
+        first_part = orig["parts"][0]["content"] if "parts" in orig else orig["content"]
+        if is_duplicate_angle(first_part, bundle.posted_history):
+            print(f"[v3] REJECTED thread {orig['candidate_id']}: duplicate_angle")
+            continue
+        selected_originals.append(orig)
+        if len(selected_originals) >= 3:
+            break
     
-    print(f"[v3] Selected: {len(selected_originals)} originals, {len(selected_qt)} qt_replies")
+    print(f"[v3] Selected: {len(selected_originals)} original threads")
     
     # Find images for selected originals
     for orig in selected_originals:
@@ -1533,7 +1529,7 @@ def main():
             print(f"[v3] No image for thread: {reason}")
     
     # Package output for Telegram
-    telegram_messages = package_with_generated_thread(selected_originals, selected_qt, bundle.mode, SHADOW_MODE)
+    telegram_messages = package_with_generated_thread(selected_originals, bundle.mode, SHADOW_MODE)
     
     # Print sample output in DRY_RUN
     if DRY_RUN or True:  # Always show for now
@@ -1550,31 +1546,13 @@ def main():
         print(f"[v3] Sent {sent} messages to Telegram")
         
         # Log selected posts
-        all_posts = []
         for o in selected_originals:
-            all_posts.append({**o, "type": "original"})
-        for q in selected_qt:
-            all_posts.append({**q, "type": "qt_reply"})
-        
-        if all_posts:
-            # Build thread-aware log entries
-            for post in all_posts:
-                if post["type"] == "original" and "parts" in post:
-                    # 4-part thread: log as one unit
-                    first_part = post["parts"][0]["content"][:80] if post["parts"] else ""
-                    image_used = post.get("image", "")
-                    image_log = f" | image={os.path.basename(image_used)}" if image_used else ""
-                    log_entry = f"\n{bundle.timestamp} | type=original_thread | parts=4 | source={post.get('source', 'unknown')}{image_log} | snippet={first_part}..."
-                    log_to_file(LOG_FILE, log_entry)
-                elif post["type"] == "original":
-                    image_used = post.get("image", "")
-                    image_log = f" | image={os.path.basename(image_used)}" if image_used else ""
-                    log_entry = f"\n{bundle.timestamp} | type=original | source={post.get('source', 'unknown')}{image_log} | snippet={post.get('content', '')[:80]}..."
-                    log_to_file(LOG_FILE, log_entry)
-                else:
-                    log_entry = f"\n{bundle.timestamp} | type={post['type']} | source={post.get('source', 'unknown')} | snippet={post.get('content', '')[:80]}..."
-                    log_to_file(LOG_FILE, log_entry)
-            print(f"[v3] Logged {len(all_posts)} posts")
+            first_part = o["parts"][0]["content"][:80] if "parts" in o else o.get("content", "")[:80]
+            image_used = o.get("image", "")
+            image_log = f" | image={os.path.basename(image_used)}" if image_used else ""
+            log_entry = f"\n{bundle.timestamp} | type=original_thread | parts=4 | source={o.get('source', 'unknown')}{image_log} | snippet={first_part}..."
+            log_to_file(LOG_FILE, log_entry)
+        print(f"[v3] Logged {len(selected_originals)} threads")
 
 
 if __name__ == "__main__":
