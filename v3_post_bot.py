@@ -155,6 +155,15 @@ EXPERIMENTS_DIR = os.path.join(BASE_DIR, "experiments_inbox")
 PROCESS_FILE = os.path.join(BASE_DIR, "process_mini.txt")
 LOG_FILE = os.path.join(BASE_DIR, "posted_log.txt")
 
+
+def log_to_file(filepath: str, entry: str):
+    """Append entry to log file."""
+    try:
+        with open(filepath, "a", encoding="utf-8") as f:
+            f.write(entry)
+    except Exception as e:
+        print(f"[v3] Log write failed: {e}")
+
 # === RUNTIME FLAGS ===
 DRY_RUN = False  # Set True to test without sending (set False for live)
 SHADOW_MODE = False  # Set True to label output as test (False = production)
@@ -861,30 +870,33 @@ def call_llm(prompt: str, max_tokens: int = 512) -> tuple[str, str, bool]:
 
 
 def build_original_prompt(candidate: Candidate, voice_rules: str) -> str:
-    """Build prompt for original builder post generation."""
-    prompt = f"""You are writing SHORT ORIGINAL BUILDER POSTS for @SatyaNaaksh.
+    """Build prompt for 4-part thread original post generation."""
+    prompt = f"""You are writing 4-PART THREAD POSTS for @SatyaNaaksh.
 
 Base rules from voice layer:
-{voice_rules[:500]}
+{voice_rules[:800]}
 
-The content is from a real experiment or hands-on test.
-The post must feel like a builder sharing a real observation.
+CONTENT GUIDANCE:
+- The content is from a real experiment or hands-on test
+- The post must feel like a builder sharing a real observation
+- Generate exactly 4 parts with clear roles
 
-FORMAT:
-- 2 to 4 lines
-- hook -> concrete result/failure -> direct question (when natural)
-- no formal structure, but one clear point only
-- must reference something specific: a tool, result, failure, timing
+4-PART FORMAT:
+PART 1: Hook - strong opening, sharp curiosity, establish what the thread is about
+PART 2: Personal Context - what was used, tested, built, noticed, or experienced
+PART 3: Core Insight - main tradeoff, lesson, failure, technical observation, or result
+PART 4: Takeaway - implication for builders, what changed, optional closing question
 
 TONE:
 - lowercase, casual, sarcastic when useful
 - "i tested / tried / this broke / this surprised me" energy
 - no thought-leader voice
 
-CONTENT:
-- prefer operational consequences
-- prefer what changes for builders in production
-- never fake a result
+RULES:
+- Each part must be meaningful (20-200 chars)
+- Do not mechanically split a paragraph into 4 chunks
+- Total thread should be 400-800 characters
+- Never fake a result
 
 Candidate content:
 {candidate.raw_text[:600]}
@@ -892,12 +904,83 @@ Candidate content:
 Matched keywords: {', '.join(candidate.lane_keywords)}
 Source: {candidate.source}
 
-Output just the raw post, one per line if multiple, no explanation."""
+Output exactly 4 parts with PART 1/2/3/4 markers. No explanation."""
     return prompt
 
 
+def parse_4part_thread(raw_output: str) -> list[dict] | None:
+    """Parse LLM output into 4 parts. Returns list of {part, content} or None if invalid."""
+    parts = []
+    
+    # Try PART 1/2/3/4 format
+    import re
+    pattern = r'PART\s*([1234])\s*:\s*(.+?)(?=PART\s*[1234]\s*:|$)'
+    matches = re.findall(pattern, raw_output, re.DOTALL | re.IGNORECASE)
+    
+    if matches:
+        for part_num, content in matches:
+            content = content.strip()
+            if content and len(content) > 5:
+                parts.append({
+                    "part": int(part_num),
+                    "content": content
+                })
+    
+    # If we got 4 valid parts, return them
+    if len(parts) == 4:
+        return parts
+    
+    # Try 1/4, 2/4, 3/4, 4/4 format
+    pattern2 = r'(1/4|2/4|3/4|4/4)\s*(.+?)(?=(1/4|2/4|3/4|4/4)|$)'
+    matches2 = re.findall(pattern2, raw_output, re.DOTALL)
+    
+    if matches2:
+        parts = []
+        for label, content in matches2:
+            content = content.strip()
+            if content and len(content) > 5:
+                part_num = int(label[0])
+                parts.append({
+                    "part": part_num,
+                    "content": content
+                })
+    
+    if len(parts) == 4:
+        return parts
+    
+    return None
+
+
+def validate_4part_thread(parts: list[dict]) -> tuple[bool, str]:
+    """Validate 4-part thread structure."""
+    if not parts or len(parts) != 4:
+        return False, "wrong_part_count"
+    
+    # Check all 4 parts present
+    part_nums = sorted([p["part"] for p in parts])
+    if part_nums != [1, 2, 3, 4]:
+        return False, "missing_parts"
+    
+    # Check each part has content
+    for p in parts:
+        if len(p["content"]) < 20:
+            return False, f"part_{p['part']}_too_thin"
+        if len(p["content"]) > 400:
+            return False, f"part_{p['part']}_too_long"
+    
+    # Check for repetitive content
+    all_content = " ".join([p["content"] for p in parts]).lower()
+    words = all_content.split()
+    if len(words) > 0:
+        unique_ratio = len(set(words)) / len(words)
+        if unique_ratio < 0.4:
+            return False, "repetitive_content"
+    
+    return True, ""
+
+
 def generate_originals(candidates: list, bundle, max_posts: int = 3) -> list:
-    """Generate original posts from top candidates."""
+    """Generate original posts as 4-part threads from top candidates."""
     if not candidates:
         return []
     
@@ -910,21 +993,33 @@ def generate_originals(candidates: list, bundle, max_posts: int = 3) -> list:
     
     generated = []
     for cand in sorted_cands:
-        # Skip if no visual
-        if cand.visual_state == "required_missing":
+        # Skip if no visual (but allow text-only via policy)
+        if cand.visual_state == "required_missing" and VISUAL_REQUIRED_FOR_ORIGINAL:
             continue
         
         prompt = build_original_prompt(cand, bundle.voice_rules or builder_rules)
-        output, provider, success = call_llm(prompt, max_tokens=256)
+        output, provider, success = call_llm(prompt, max_tokens=400)
         
-        if success and output and len(output) > 10:
-            generated.append({
-                "candidate_id": cand.id,
-                "content": output,
-                "source": cand.source,
-                "score": cand.computed_score
-            })
-            print(f"[v3] Generated original from {cand.source} via {provider}")
+        if success and output and len(output) > 50:
+            # Parse into 4 parts
+            parts = parse_4part_thread(output)
+            
+            if parts:
+                # Validate structure
+                is_valid, reason = validate_4part_thread(parts)
+                if is_valid:
+                    generated.append({
+                        "candidate_id": cand.id,
+                        "parts": parts,
+                        "content": output,
+                        "source": cand.source,
+                        "score": cand.computed_score
+                    })
+                    print(f"[v3] Generated 4-part thread from {cand.source} via {provider}")
+                else:
+                    print(f"[v3] REJECTED thread {cand.id}: {reason}")
+            else:
+                print(f"[v3] REJECTED thread {cand.id}: no_valid_4part_structure")
     
     return generated
 
@@ -970,12 +1065,21 @@ Output just the draft, one per line if multiple."""
 
 # === SELECTION AND VALIDATION ===
 
-def validate_original(post_content: str, candidate) -> tuple[bool, str]:
+def validate_original(post_content: str, candidate, is_thread: bool = False) -> tuple[bool, str]:
     """Validate generated original post. Returns (is_valid, rejection_reason)."""
-    # Check line count
+    import re
+    
+    # Check line count - threads expect 4 lines with PART markers
     lines = [l.strip() for l in post_content.split("\n") if l.strip()]
-    if len(lines) > 4:
-        return False, "exceeds_4_lines"
+    if is_thread:
+        # For 4-part threads: expect 4 lines, each starting with PART
+        part_lines = [l for l in lines if re.match(r'^PART\s*[1234]', l, re.IGNORECASE)]
+        if len(part_lines) != 4:
+            return False, "not_4_part_thread"
+    else:
+        # For short posts: allow up to 4 lines
+        if len(lines) > 4:
+            return False, "exceeds_4_lines"
     
     # Check for banned patterns
     lower = post_content.lower()
@@ -992,7 +1096,6 @@ def validate_original(post_content: str, candidate) -> tuple[bool, str]:
         return False, "no_specific_detail"
     
     # Visual policy: strongly prefer for experiment, not mandatory
-    # Skip reject on "required_missing" unless explicitly configured
     if VISUAL_REQUIRED_FOR_ORIGINAL and candidate.visual_state == "required_missing":
         return False, "no_visual_backing"
     
@@ -1072,24 +1175,40 @@ def select_outputs(
     selected_qt = []
     selected_threads = []
     
-    # Select originals (max 3)
+    # Select originals as 4-part threads (max 3)
     for orig in originals:
-        # Validate
-        is_valid, reason = validate_original(orig["content"], orig.get("candidate"))
-        if not is_valid:
-            print(f"[v3] REJECTED original {orig['candidate_id']}: {reason}")
-            continue
+        # Handle 4-part thread structure
+        if "parts" in orig:
+            # Validate using the full content
+            is_valid, reason = validate_original(orig["content"], orig.get("candidate"), is_thread=True)
+            if not is_valid:
+                print(f"[v3] REJECTED thread {orig['candidate_id']}: {reason}")
+                continue
+            
+            # Check first part for duplicate angle
+            first_part = orig["parts"][0]["content"] if orig["parts"] else orig["content"]
+            if is_duplicate_angle(first_part, posted_history):
+                print(f"[v3] REJECTED thread {orig['candidate_id']}: duplicate_angle")
+                continue
+            
+            selected_originals.append(orig)
+        else:
+            # Fallback to short post validation
+            is_valid, reason = validate_original(orig["content"], orig.get("candidate"), is_thread=False)
+            if not is_valid:
+                print(f"[v3] REJECTED original {orig['candidate_id']}: {reason}")
+                continue
+            
+            if is_duplicate_angle(orig["content"], posted_history):
+                print(f"[v3] REJECTED original {orig['candidate_id']}: duplicate_angle")
+                continue
+            
+            selected_originals.append(orig)
         
-        # Duplicate check
-        if is_duplicate_angle(orig["content"], posted_history):
-            print(f"[v3] REJECTED original {orig['candidate_id']}: duplicate_angle")
-            continue
-        
-        selected_originals.append(orig)
         if len(selected_originals) >= 3:
             break
     
-    # Select QT/replies (max 5)
+    # Select QT/replies (max 5) - unchanged
     for qt in qt_replies:
         is_valid, reason = validate_qt_reply(qt["content"])
         if not is_valid:
@@ -1280,82 +1399,64 @@ def send_telegram(message: str) -> bool:
         return False
 
 
-def send_to_telegram(messages: list, posts_with_images: dict, batch_label: str = "") -> int:
-    """Send messages to Telegram with delays. posts_with_images maps index to image_path."""
+def expand_thread_to_messages(orig: dict, index: int) -> list[tuple[str, str | None]]:
+    """Expand a 4-part thread into 4 individual messages with labels.
+    Returns list of (content, image_path) tuples for send_to_telegram."""
+    if "parts" in orig:
+        messages = []
+        for part in orig["parts"]:
+            label = f"{part['part']}/4"
+            image = orig.get("image") if part["part"] == 1 else None
+            messages.append((f"{label} {part['content']}", image))
+        return messages
+    else:
+        return [(orig.get("content", ""), orig.get("image"))]
+
+
+def send_to_telegram(messages: list, batch_label: str = "") -> int:
+    """Send messages to Telegram. messages is list of (text, image_path) tuples."""
     sent_count = 0
     
-    for i, msg in enumerate(messages):
+    for i, (msg, image_path) in enumerate(messages):
         if msg.strip():
-            # Check if this message has an image
-            if i in posts_with_images and posts_with_images[i]:
-                image_path = posts_with_images[i]
+            if image_path and os.path.exists(image_path):
                 if send_photo_to_telegram(TELEGRAM_CHAT_ID, msg, image_path):
                     sent_count += 1
-                    print(f"[v3] Sent photo: {os.path.basename(image_path)}")
+                    print(f"[v3] Sent photo {i+1}: {os.path.basename(image_path)}")
             else:
                 if send_telegram(msg):
                     sent_count += 1
-            time.sleep(1)  # Rate limit
+                    print(f"[v3] Sent message {i+1}")
+        time.sleep(1)  # Rate limit
     
     return sent_count
 
 
-# === LOGGING ===
-
-def update_log_v3(
-    posts: list,
-    mode: str,
-    bundle_timestamp: str
-) -> None:
-    """Append to posted_log.txt with richer format."""
-    timestamp = bundle_timestamp
-    
-    for post in posts:
-        post_type = post.get("type", "original")
-        source = post.get("source", "unknown")
-        content = post.get("content", "")[:80]
-        image_used = post.get("image", "")
-        
-        # Determine visual state
-        visual_indicator = "visual=present" if "experiment" in source else "visual=optional"
-        
-        # Include image info if present
-        image_log = f" | image={os.path.basename(image_used)}" if image_used else ""
-        
-        log_line = f"{timestamp} | {mode} | type={post_type} | {visual_indicator}{image_log} | source={source} | snippet={content}...\n"
-        
-        with open(LOG_FILE, "a", encoding="utf-8") as f:
-            f.write(log_line)
-
-
-def package_with_generated(originals: list, qt_replies: list, threads: list, mode: str, is_shadow: bool = False) -> list[str]:
-    """Package generated outputs for Telegram delivery."""
+def package_with_generated_thread(originals: list, qt_replies: list, mode: str, is_shadow: bool = False) -> list[tuple[str, str | None]]:
+    """Package 4-part threads and QT/replies for Telegram. Returns list of (content, image_path) tuples."""
     messages = []
     
-    # Batch header
     shadow_tag = " [v3 TEST]" if is_shadow else ""
-    messages.append(f"[v3 {mode} batch]{shadow_tag}")
-    messages.append("")
+    messages.append((f"[v3 {mode} batch]{shadow_tag}", None))
     
-    # Original posts section
+    # Original 4-part threads
     if originals:
-        messages.append("======== ORIGINAL POSTS ========")
-        messages.append("(image required)")
-        messages.append("")
         for orig in originals:
-            messages.append(orig)
-            messages.append("")
+            if "parts" in orig:
+                for part in orig["parts"]:
+                    label = f"{part['part']}/4"
+                    image = orig.get("image") if part["part"] == 1 else None
+                    messages.append((f"{label} {part['content']}", image))
+            else:
+                messages.append((orig.get("content", ""), orig.get("image")))
     else:
-        messages.append("ORIGINAL POSTS: (none passed validation)")
-        messages.append("")
+        messages.append(("ORIGINAL THREADS: (none passed validation)", None))
     
-    # QT/reply section
+    # QT/replies section
     if qt_replies:
-        messages.append("======== QT / REPLY DRAFTS ========")
-        messages.append("")
+        messages.append(("======== QT / REPLY DRAFTS ========", None))
         for qt in qt_replies:
-            messages.append(qt)
-            messages.append("")
+            messages.append((qt.get("content", ""), None))
     
     return messages
 
@@ -1416,37 +1517,36 @@ def main():
     print(f"[v3] Selected: {len(selected_originals)} originals, {len(selected_qt)} qt_replies")
     
     # Find images for selected originals
-    posts_with_images = {}
-    for i, orig in enumerate(selected_originals):
+    for orig in selected_originals:
         candidate = orig.get("candidate")
-        image_path, reason = find_best_image_for_post(orig["content"], candidate)
+        # Use first part content for image matching
+        content = orig["parts"][0]["content"] if "parts" in orig else orig.get("content", "")
+        image_path, reason = find_best_image_for_post(content, candidate)
         if image_path:
             is_valid, valid_reason = is_valid_telegram_image(image_path)
             if is_valid:
-                posts_with_images[i] = image_path
                 orig["image"] = image_path
-                print(f"[v3] Image matched for original {i}: {os.path.basename(image_path)} ({valid_reason})")
+                print(f"[v3] Image matched: {os.path.basename(image_path)} ({valid_reason})")
             else:
-                print(f"[v3] Image skipped for original {i}: {os.path.basename(image_path)} - {valid_reason}")
-                print(f"[v3] Falling back to text-only for original {i}")
+                print(f"[v3] Image skipped: {os.path.basename(image_path)} - {valid_reason}")
         else:
-            print(f"[v3] No image found for original {i}: {reason}")
+            print(f"[v3] No image for thread: {reason}")
     
-    # Package output
-    orig_texts = [g["content"] for g in selected_originals]
-    qt_texts = [g["content"] for g in selected_qt]
-    messages = package_with_generated(orig_texts, qt_texts, [], bundle.mode, SHADOW_MODE)
+    # Package output for Telegram
+    telegram_messages = package_with_generated_thread(selected_originals, selected_qt, bundle.mode, SHADOW_MODE)
     
     # Print sample output in DRY_RUN
     if DRY_RUN or True:  # Always show for now
         print("[v3] === Generated Output ===")
-        for msg in messages[:20]:
+        for msg, img in telegram_messages[:25]:
             print(msg)
+            if img:
+                print(f"  [image: {os.path.basename(img)}]")
         print("[v3] === End ===")
     
     # Send to Telegram (skip in DRY_RUN)
-    if not DRY_RUN and messages:
-        sent = send_to_telegram(messages, posts_with_images, bundle.mode)
+    if not DRY_RUN and telegram_messages:
+        sent = send_to_telegram(telegram_messages, bundle.mode)
         print(f"[v3] Sent {sent} messages to Telegram")
         
         # Log selected posts
@@ -1457,7 +1557,23 @@ def main():
             all_posts.append({**q, "type": "qt_reply"})
         
         if all_posts:
-            update_log_v3(all_posts, bundle.mode, bundle.timestamp)
+            # Build thread-aware log entries
+            for post in all_posts:
+                if post["type"] == "original" and "parts" in post:
+                    # 4-part thread: log as one unit
+                    first_part = post["parts"][0]["content"][:80] if post["parts"] else ""
+                    image_used = post.get("image", "")
+                    image_log = f" | image={os.path.basename(image_used)}" if image_used else ""
+                    log_entry = f"\n{bundle.timestamp} | type=original_thread | parts=4 | source={post.get('source', 'unknown')}{image_log} | snippet={first_part}..."
+                    log_to_file(LOG_FILE, log_entry)
+                elif post["type"] == "original":
+                    image_used = post.get("image", "")
+                    image_log = f" | image={os.path.basename(image_used)}" if image_used else ""
+                    log_entry = f"\n{bundle.timestamp} | type=original | source={post.get('source', 'unknown')}{image_log} | snippet={post.get('content', '')[:80]}..."
+                    log_to_file(LOG_FILE, log_entry)
+                else:
+                    log_entry = f"\n{bundle.timestamp} | type={post['type']} | source={post.get('source', 'unknown')} | snippet={post.get('content', '')[:80]}..."
+                    log_to_file(LOG_FILE, log_entry)
             print(f"[v3] Logged {len(all_posts)} posts")
 
 

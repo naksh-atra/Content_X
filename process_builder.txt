@@ -31,18 +31,38 @@ Content Archetypes (choose the best fit for the content):
 5. Operating-System: Repeatable working habits, structure, tooling discipline, setup choices
 6. Missing-Layer: "Everyone focuses on the flashy layer, but the real issue is elsewhere"
 
-Post Rules (follow strictly):
+Thread Format (4-Part Thread):
 
-For short posts:
-- Line 1 (Hook): Strong, specific opening — what you tested + key outcome in one tight line
-- Line 2-3: Concrete personal details — numbers, what worked, what failed, surprising result, measurable observation
-- Final line: Clear, natural question that invites other devs to reply with their experience
+ALL original posts must be generated as an exact 4-part thread.
 
-For threads:
-- Mark as THREAD at the start
-- Keep to 3-5 tweets max
-- Focus on one single experiment or workflow
-- End the last tweet with a discussion question
+Structure:
+PART 1 — Hook: Strong opening, sharp curiosity, establish what the thread is about. Do not over-explain.
+PART 2 — Personal Context: What was used, tested, built, noticed, or experienced. First-hand context.
+PART 3 — Core Insight: The main tradeoff, lesson, failure mode, technical observation, or result. Substance-heavy.
+PART 4 — Takeaway: Implication for builders, what changed in your view, optional strong closing question.
+
+Format output as:
+PART 1: <text>
+PART 2: <text>
+PART 3: <text>
+PART 4: <text>
+
+Rules:
+- Each part must be meaningful and carry distinct content
+- Do not mechanically split a single paragraph into 4 chunks
+- Do not pad or produce bloated threadbro content
+- Keep writing sharp, human, and useful to builders
+- Total thread should be 400-800 characters total (100-200 per part)
+- Parts should follow natural progression
+
+Thin content rule:
+- If the candidate is too thin for 4 meaningful parts, mark as REJECT
+- A strong short post is better than a weak 4-part thread
+
+Output Format:
+- Output exactly 4 parts with PART 1/2/3/4 markers
+- One space after colon
+- No explanations, no numbering beyond PART labels
 
 General Requirements:
 - Always personal and first-hand: Use "I tested", "I ran", "Spent X hours", "Got Y%", "Broke on", "This actually worked better than expected", etc.
