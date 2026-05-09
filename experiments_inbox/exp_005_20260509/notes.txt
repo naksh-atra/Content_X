@@ -1,0 +1,15 @@
+What was tested:
+- Ran Claude Code CLI on a medium-sized refactoring task
+- Tested response latency vs GitHub Copilot
+- Measured code quality on a 500-line Python migration
+
+Result:
+- CLI response time: 2.3 seconds average for code suggestions
+- GitHub Copilot: 1.1 seconds (faster)
+- Claude Code had better context understanding
+- Copilot faster but less accurate on complex refactors
+
+Key observation:
+- Claude Code wins on complex tasks where context matters
+- Copilot wins on speed for simple completions
+- For production code, accuracy > speed

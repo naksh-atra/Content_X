@@ -1,0 +1,14 @@
+What was tested:
+- Created custom cursor rules for Next.js + Prisma projects
+- Measured productivity difference with vs without rules
+- Tested on 10 similar tasks
+
+Result:
+- With rules: 40% faster on standard tasks
+- Rules helped maintain consistency
+- Initial setup took 2 hours, saved 20+ hours over month
+
+Key observation:
+- Cursor rules are worth the upfront investment
+- Best for frameworks you use repeatedly
+- Start with 3-5 rules, expand as needed

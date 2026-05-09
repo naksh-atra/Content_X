@@ -1,0 +1,15 @@
+What was tested:
+- Set up Ollama with Llama 3 on local machine
+- Compared to cloud APIs for coding tasks
+- Tested quality vs cost tradeoffs
+
+Result:
+- Local setup cost: $0 (just electricity)
+- Cloud API cost: ~$0.10 per 1000 tokens
+- Local quality acceptable for simple tasks
+- Cloud still better for complex reasoning
+
+Key observation:
+- Local LLMs viable for simple repetitive tasks
+- Not ready for production complex workflows yet
+- Privacy benefit is real for sensitive code
