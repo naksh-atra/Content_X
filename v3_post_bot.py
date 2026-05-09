@@ -176,6 +176,9 @@ ENABLE_QT_REPLIES = False  # Disabled - only 4-part original threads
 VISUAL_REQUIRED_FOR_ORIGINAL = False      # False = allow text-only strong originals
 VISUAL_PREFERRED_FOR_EXPERIMENT_ORIGINAL = True   # True = strongly prefer, not block
 
+# Experiment cool-off (prevent repetition)
+EXPERIMENT_COOLOFF_HOURS = 48  # Skip experiments used in last 48 hours
+
 # === LANE KEYWORDS ===
 LANE_KEYWORDS = [
     "ai agent", "agents", "cursor", "github copilot", "vscode", "autogen",
@@ -302,8 +305,11 @@ def short_snippet(text: str, n: int = 120) -> str:
 
 # === EXPERIMENT SCANNING ===
 
-def scan_experiments_inbox(max_folders: int = 5) -> list[ExperimentBundle]:
+def scan_experiments_inbox(max_folders: int = 5, recent_experiments: set = None) -> list[ExperimentBundle]:
     """Scan experiments_inbox/ and return valid ExperimentBundle list."""
+    if recent_experiments is None:
+        recent_experiments = set()
+    
     if not os.path.isdir(EXPERIMENTS_DIR):
         return []
     
@@ -320,9 +326,22 @@ def scan_experiments_inbox(max_folders: int = 5) -> list[ExperimentBundle]:
     folders_with_mtime.sort(reverse=True, key=lambda x: x[0])
     
     experiments = []
-    for mtime, folder in folders_with_mtime[:max_folders]:
+    skipped_cooloff = 0
+    for mtime, folder in folders_with_mtime[:max_folders + 5]:  # Scan extra to account for cooloff
+        # Skip experiments in cool-off period
+        if folder in recent_experiments:
+            skipped_cooloff += 1
+            continue
+        
         exp = parse_experiment_folder(folder, mtime)
-        experiments.append(exp)
+        if not exp.skip_reason:
+            experiments.append(exp)
+        
+        if len(experiments) >= max_folders:
+            break
+    
+    if skipped_cooloff > 0:
+        print(f"[v3] Skipped {skipped_cooloff} experiments in cool-off period")
     
     return experiments
 
@@ -575,8 +594,13 @@ def assign_candidate_type(candidate: Candidate) -> str:
     if not candidate.lane_match:
         return "discard"
     
-    visual_required = VISUAL_PREFERRED_FOR_EXPERIMENT_ORIGINAL and candidate.source_type == "experiment"
-    visual_ok = candidate.visual_state != "required_missing" or not visual_required
+    # Visual preference: experiments preferred but not required (unless explicitly set)
+    visual_preferred = VISUAL_PREFERRED_FOR_EXPERIMENT_ORIGINAL and candidate.source_type == "experiment"
+    if visual_preferred:
+        # Only block if visual is missing AND visual is required (global flag)
+        visual_ok = candidate.visual_state != "required_missing" or not VISUAL_REQUIRED_FOR_ORIGINAL
+    else:
+        visual_ok = True
     
     # Experiment source
     if candidate.source_type == "experiment":
@@ -631,16 +655,31 @@ def load_inputs() -> Optional[InputBundle]:
     else:
         print(f"[v3] No {mode}_dump.txt found")
     
-    # Scan experiments
+    # Load posted history first
+    posted_history = safe_read_text_file(LOG_FILE)
+    
+    # Scan experiments with cool-off
     experiments = []
     if ENABLE_EXPERIMENTS:
-        experiments = scan_experiments_inbox(max_folders=5)
+        recent_exps = get_recently_used_experiments(posted_history, EXPERIMENT_COOLOFF_HOURS)
+        if recent_exps:
+            print(f"[v3] Experiments in cool-off: {recent_exps}")
+        experiments = scan_experiments_inbox(max_folders=5, recent_experiments=recent_exps)
         valid = sum(1 for e in experiments if not e.skip_reason)
         skipped = sum(1 for e in experiments if e.skip_reason)
         print(f"[v3] Experiments: {valid} valid, {skipped} skipped")
     
-    # Load posted history
-    posted_history = safe_read_text_file(LOG_FILE)
+    # If no experiments available, try emergency fallback (reuse recent ones)
+    if ENABLE_EXPERIMENTS and not experiments and ENABLE_DUMP_ORIGINALS:
+        print(f"[v3] No fresh experiments - attempting emergency fallback...")
+        recent_exps_fallback = get_recently_used_experiments("", 0)  # Clear recent
+        experiments = scan_experiments_inbox(max_folders=3, recent_experiments=set())
+        if experiments:
+            print(f"[v3] Emergency fallback: using {len(experiments)} experiments (reused)")
+    
+    # If still no experiments, log it
+    if ENABLE_EXPERIMENTS and not experiments:
+        print(f"[v3] No experiments available. Relying on dump content.")
     
     # Load voice rules
     voice_rules = safe_read_text_file(PROCESS_FILE)
@@ -1130,6 +1169,44 @@ def validate_qt_reply(post_content: str) -> tuple[bool, str]:
         return False, "no_original_observation"
     
     return True, ""
+
+
+def get_recently_used_experiments(posted_history: str, hours: int = 48) -> set[str]:
+    """Extract experiment folder names used in last N hours from posted_log."""
+    from datetime import datetime, timedelta
+    
+    if not posted_history:
+        return set()
+    
+    recent_experiments = set()
+    now = datetime.now()
+    
+    # Parse last 100 lines for recent usage
+    history_lines = posted_history.strip().split("\n")[-100:]
+    
+    for line in history_lines:
+        if not line or "|" not in line:
+            continue
+        
+        # Extract timestamp from beginning of line
+        # Format: "09 May 2026 10:55 | ..."
+        try:
+            timestamp_str = line.split("|")[0].strip()
+            if len(timestamp_str) >= 16:
+                # Parse "09 May 2026 10:55"
+                parsed_time = datetime.strptime(timestamp_str, "%d %b %Y %H:%M")
+                time_diff = now - parsed_time
+                
+                # If within cool-off period, mark experiment as used
+                if time_diff.total_seconds() <= hours * 3600:
+                    # Extract experiment name from "source=experiment:exp_XXX"
+                    if "experiment:" in line:
+                        exp_part = line.split("experiment:")[1].split()[0]
+                        recent_experiments.add(exp_part)
+        except (ValueError, IndexError):
+            continue
+    
+    return recent_experiments
 
 
 def is_duplicate_angle(new_text: str, posted_history: str, similarity_threshold: float = 0.6) -> bool:

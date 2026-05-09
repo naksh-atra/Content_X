@@ -1,0 +1,6 @@
+title: local llm setup comparison
+date: 2026-05-09
+status: partial
+visual_files: none
+tags: local, llm, ollama, setup
+notes_ref: notes.txt

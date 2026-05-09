@@ -1,0 +1,6 @@
+title: github copilot workspace test
+date: 2026-05-09
+status: success
+visual_files: none
+tags: copilot, github, workspace, comparison
+notes_ref: notes.txt

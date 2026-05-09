@@ -1,0 +1,14 @@
+What was tested:
+- Measured API response times for GPT-4o vs Claude 3.5 Sonnet
+- Tested 100 requests for coding task (code review, refactor, debug)
+- Measured first token latency and total time
+
+Result:
+- GPT-4o average: 1.8s total, 0.3s first token
+- Claude 3.5: 2.4s total, 0.5s first token
+- Claude slightly slower but more accurate on code review
+
+Key observation:
+- For speed-critical apps: GPT-4o wins
+- For accuracy-critical: Claude worth the extra time
+- Latency difference is noticeable but not dealbreaker
