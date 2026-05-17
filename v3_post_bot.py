@@ -347,36 +347,55 @@ def scan_experiments_inbox(max_folders: int = 5, recent_experiments: set = None)
 
 
 def parse_experiment_folder(folder_name: str, folder_mtime: float) -> ExperimentBundle:
-    """Parse one experiment folder into ExperimentBundle."""
+    """Parse one experiment folder into ExperimentBundle.
+    
+    Accepts any .txt file(s) — no strict meta.txt + notes.txt requirement.
+    - meta.txt: parsed for structured metadata; if missing, defaults are auto-generated.
+    - Any other .txt file: concatenated as notes_raw.
+    - Structured sections (What was tested:/Result:/Key observation:) are parsed
+      if present; otherwise the full raw text is used.
+    """
     folder_path = os.path.join(EXPERIMENTS_DIR, folder_name)
     meta_path = os.path.join(folder_path, "meta.txt")
-    notes_path = os.path.join(folder_path, "notes.txt")
     
-    # Check required files
-    if not os.path.exists(meta_path) or not os.path.exists(notes_path):
-        return ExperimentBundle(
-            folder_name=folder_name,
-            title="",
-            date="",
-            status="",
-            tags=[],
-            visual_files=[],
-            notes_raw="",
-            what_was_tested="",
-            result="",
-            key_observation="",
-            has_visual=False,
-            folder_mtime=folder_mtime,
-            skip_reason="missing meta.txt or notes.txt"
-        )
+    # Detect any .txt files in the folder
+    txt_files = [f for f in os.listdir(folder_path) if f.endswith(".txt") and os.path.isfile(os.path.join(folder_path, f))]
     
-    # Parse meta.txt
-    meta = safe_read_text_file(meta_path)
-    meta_dict = parse_meta_txt(meta)
+    # Parse meta.txt if it exists; otherwise auto-generate defaults
+    if os.path.exists(meta_path):
+        meta = safe_read_text_file(meta_path)
+        meta_dict = parse_meta_txt(meta)
+    else:
+        # Auto-generate defaults from folder name convention: exp_NNN_YYYYMMDD
+        parts = folder_name.split("_")
+        date_str = parts[2] if len(parts) >= 3 and parts[2].isdigit() else ""
+        if len(date_str) == 8:
+            date_str = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
+        meta_dict = {
+            "title": " ".join(parts[1:]) if len(parts) > 1 else folder_name,
+            "date": date_str,
+            "status": "draft",
+            "tags": []
+        }
     
-    # Parse notes.txt
-    notes_raw = safe_read_text_file(notes_path)
-    notes_dict = parse_notes_txt(notes_raw)
+    # Read any .txt files and concatenate as notes_raw
+    notes_lines = []
+    for fname in txt_files:
+        fpath = os.path.join(folder_path, fname)
+        content = safe_read_text_file(fpath)
+        if content:
+            notes_lines.append(content)
+    notes_raw = "\n\n".join(notes_lines) if notes_lines else ""
+    
+    # Try structured parsing; fallback to raw text
+    notes_dict = parse_notes_txt(notes_raw) if notes_raw else {}
+    what_was_tested = notes_dict.get("what_was_tested", "") or ""
+    result = notes_dict.get("result", "") or ""
+    key_observation = notes_dict.get("key_observation", "") or ""
+    
+    # If structured parsing found nothing, use raw text as what_was_tested
+    if not what_was_tested and not result and not key_observation:
+        what_was_tested = notes_raw
     
     # Detect visual files
     visual_files = detect_visual_files(folder_path)
@@ -390,9 +409,9 @@ def parse_experiment_folder(folder_name: str, folder_mtime: float) -> Experiment
         tags=meta_dict.get("tags", []),
         visual_files=visual_files,
         notes_raw=notes_raw,
-        what_was_tested=notes_dict.get("what_was_tested", ""),
-        result=notes_dict.get("result", ""),
-        key_observation=notes_dict.get("key_observation", ""),
+        what_was_tested=what_was_tested,
+        result=result,
+        key_observation=key_observation,
         has_visual=has_visual,
         folder_mtime=folder_mtime,
         skip_reason=""
