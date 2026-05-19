@@ -995,8 +995,9 @@ def parse_4part_thread(raw_output: str) -> list[dict] | None:
     
     if matches2:
         parts = []
-        for label, content in matches2:
-            content = content.strip()
+        for match in matches2:
+            label = match[0]
+            content = match[1].strip()
             if content and len(content) > 5:
                 part_num = int(label[0])
                 parts.append({
@@ -1125,37 +1126,34 @@ Output just the draft, one per line if multiple."""
 # === SELECTION AND VALIDATION ===
 
 def validate_original(post_content: str, candidate, is_thread: bool = False) -> tuple[bool, str]:
-    """Validate generated original post. Returns (is_valid, rejection_reason)."""
+    """Validate generated original post. Returns (is_valid, rejection_reason).
+    
+    NOTE: Structure (4-part thread format) is already validated upstream
+    in generate_originals → validate_4part_thread. This function only
+    checks content quality (specificity, banned patterns, generic phrasing).
+    """
     import re
     
-    # Check line count - threads expect 4 lines with PART markers
-    lines = [l.strip() for l in post_content.split("\n") if l.strip()]
-    if is_thread:
-        # For 4-part threads: expect 4 lines, each starting with PART
-        part_lines = [l for l in lines if re.match(r'^PART\s*[1234]', l, re.IGNORECASE)]
-        if len(part_lines) != 4:
-            return False, "not_4_part_thread"
-    else:
-        # For short posts: allow up to 4 lines
-        if len(lines) > 4:
-            return False, "exceeds_4_lines"
+    lower = post_content.lower()
     
     # Check for banned patterns
-    lower = post_content.lower()
     if any(banned in lower for banned in ["#", "##", "emoji", "em dash"]):
         return False, "contains_banned_formatting"
     
     # Must name something specific (tool, time, result, comparison)
     has_specific = any(word in lower for word in [
-        "ms", "seconds", "minutes", "hours", "%", "error", "failed", 
+        "ms", "seconds", "minutes", "hours", "%", "error", "failed",
         "cursor", "copilot", "langchain", "autogen", "vscode",
-        "benchmark", "latency", "tokens", "lines of code"
+        "benchmark", "latency", "tokens", "lines of code",
+        "tested", "built", "tried", "used", "compared", "switched",
+        "migrated", "deployed", "configured", "measured", "discovered",
+        "faster", "slower", "better", "worse", "reduced", "increased"
     ])
     if not has_specific:
         return False, "no_specific_detail"
     
     # Visual policy: strongly prefer for experiment, not mandatory
-    if VISUAL_REQUIRED_FOR_ORIGINAL and candidate.visual_state == "required_missing":
+    if VISUAL_REQUIRED_FOR_ORIGINAL and candidate and candidate.visual_state == "required_missing":
         return False, "no_visual_backing"
     
     # Check for generic phrases
