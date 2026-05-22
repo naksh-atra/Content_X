@@ -169,7 +169,7 @@ DRY_RUN = False  # Set True to test without sending (set False for live)
 SHADOW_MODE = False  # Set True to label output as test (False = production)
 ENABLE_THREADS = False
 ENABLE_DUMP_ORIGINALS = True
-ENABLE_EXPERIMENTS = True
+ENABLE_EXPERIMENTS = False
 ENABLE_QT_REPLIES = False  # Disabled - only 4-part original threads
 
 # Visual policy (builder identity, not image-mandatory)
@@ -200,7 +200,7 @@ PENALTY_NO_VISUAL = 15
 
 # === THRESHOLDS ===
 THRESHOLD_EXPERIMENT_ORIGINAL = 25
-THRESHOLD_DUMP_ORIGINAL = 40
+THRESHOLD_DUMP_ORIGINAL = 10
 THRESHOLD_THREAD = 20
 THRESHOLD_QT_REPLY = 10
 
@@ -633,7 +633,7 @@ def assign_candidate_type(candidate: Candidate) -> str:
     
     # Dump source
     if ENABLE_DUMP_ORIGINALS:
-        if candidate.computed_score >= THRESHOLD_DUMP_ORIGINAL and candidate.visual_state != "required_missing" and candidate.first_party_strength != "low":
+        if candidate.computed_score >= THRESHOLD_DUMP_ORIGINAL:
             return "original"
     
     if ENABLE_THREADS and candidate.computed_score >= THRESHOLD_THREAD:
