@@ -274,11 +274,13 @@ def send_telegram(message):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         return
     try:
-        requests.post(
-            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-            json={"chat_id": TELEGRAM_CHAT_ID, "text": message[:4000], "parse_mode": "HTML"},
-            timeout=10,
-        ).raise_for_status()
+        parts = [message[i:i+4000] for i in range(0, len(message), 4000)]
+        for part in parts:
+            requests.post(
+                f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+                json={"chat_id": TELEGRAM_CHAT_ID, "text": part, "parse_mode": "HTML"},
+                timeout=10,
+            ).raise_for_status()
     except Exception as e:
         print(f"  Telegram fail: {e}")
 
@@ -301,7 +303,8 @@ def main():
     wc = len(article.split())
     print(f"\nDone. {wc} words via {provider} in {duration:.0f}s")
     print(f"File: {filepath}")
-    send_telegram(f"Blog Article Ready\nTitle: {title}\nWords: {wc}\nProvider: {provider}\nFile: {filename}")
+    msg = f"<b>{title}</b>\n{datetime.now().strftime('%d %B %Y')}  |  {wc} words\n\n{article}"
+    send_telegram(msg)
 
 
 if __name__ == "__main__":
