@@ -31,21 +31,18 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 SOURCES = {
     "rss": [
-        "https://techcrunch.com/feed/",
-        "https://dev.to/feed",
-        "https://hnrss.org/frontpage",
+        "https://hnrss.org/frontpage?q=AI+OR+LLM+OR+GPT+OR+artificial+intelligence+OR+machine+learning+OR+neural",
+        "https://techcrunch.com/tag/artificial-intelligence/feed/",
     ],
     "scrape": [
-        "https://github.com/trending",
-        "https://www.producthunt.com/",
+        "https://www.producthunt.com/tags/artificial-intelligence",
     ],
     "reddit": [
         "artificial",
         "MachineLearning",
         "LocalLLaMA",
-        "technology",
-        "programming",
-        "startups",
+        "singularity",
+        "ChatGPT",
     ],
 }
 
@@ -76,7 +73,7 @@ def fetch_rss(url):
 def fetch_hacker_news():
     items = []
     try:
-        for query in ["AI", "coding"]:
+        for query in ["AI", "LLM", "GPT", "Mistral", "Claude", "Gemini"]:
             resp = requests.get(
                 f"https://hn.algolia.com/api/v1/search?query={query}&tags=story&hitsPerPage=15",
                 timeout=TIMEOUT,
@@ -187,8 +184,8 @@ def call_groq(prompt):
             json={
                 "model": "llama-3.3-70b-versatile",
                 "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 8192,
-                "temperature": 0.95,
+                "max_tokens": 12288,
+                "temperature": 0.9,
             },
             timeout=120,
         )
@@ -221,19 +218,19 @@ def call_gemini(prompt):
 def generate_article(items):
     context = summarize_items(items)
     date_str = datetime.now().strftime("%d %B %Y")
-    prompt = f"""Today is {date_str}. Here are the most interesting tech stories:
+    prompt = f"""Today is {date_str}. Here are today's AI stories:
 
 {context}
 
-Write a blog article on these. Pick 2 stories and go deep on each. Write at least 1000 words.
+Write a blog post with your takes. Pick 2 stories. Cover both.
 
-Open with a concrete detail from one story that caught your attention. Not a greeting, not a general statement. A real detail.
+For the first story: 4 to 6 paragraphs. Lead with your take, not the news. What is overhyped, what is underrated, what everyone is missing. If you have hands-on experience with this, share it.
 
-For each story: explain what happened using facts from the text above. Then say why it matters. Be specific about what this means for people building things.
+For the second story: 3 to 4 paragraphs. Same approach. Connect it to the first story if there is a real connection.
 
-End by connecting the stories. What do they reveal together.
+Closing: 1 paragraph. What you are watching next.
 
-Use short paragraphs. Mix short and long sentences. No em dashes. Write naturally."""
+This is your personal blog. Write like an engineer who ships AI products. No scene setting. No "today I was scrolling." No em dashes. Assume the reader follows AI closely."""
     
     article = call_groq(prompt)
     if not article:
